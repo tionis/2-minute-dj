@@ -66,6 +66,10 @@ A "second-screen" party game where users join a session hosted on a TV/Laptop us
 4.  Push to the branch (`git push origin feature/your-feature`).
 5.  Open a Pull Request.
 
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
 ## Feedback
 
 Got any feedback or questions? Join our [Discord](https://discord.gg/hgVf9R6SBm).
