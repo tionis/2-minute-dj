@@ -1,12 +1,33 @@
+"use client";
+
 import Link from "next/link";
-import { Disc, Smartphone, Monitor } from "lucide-react";
+import { Disc, Smartphone, Monitor, Languages } from "lucide-react";
+import { useI18n } from "@/components/LanguageProvider";
 
 export default function Home() {
+  const { t, language, setLanguage } = useI18n();
+
   return (
     <div className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-center p-4 relative overflow-hidden">
       {/* Background decoration */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-indigo-900/20 via-neutral-950 to-neutral-950 z-0" />
       
+      {/* Language Switcher */}
+      <div className="absolute top-8 right-8 z-20 flex items-center space-x-2 bg-neutral-900/50 p-1 rounded-full border border-neutral-800">
+        <button 
+          onClick={() => setLanguage("en")}
+          className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${language === "en" ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "text-neutral-500 hover:text-neutral-300"}`}
+        >
+          EN
+        </button>
+        <button 
+          onClick={() => setLanguage("de")}
+          className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${language === "de" ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "text-neutral-500 hover:text-neutral-300"}`}
+        >
+          DE
+        </button>
+      </div>
+
       <div className="z-10 flex flex-col items-center space-y-12 max-w-md w-full">
         <div className="text-center space-y-4">
           <div className="inline-block p-4 rounded-full bg-indigo-500/10 mb-4 animate-pulse">
@@ -16,7 +37,7 @@ export default function Home() {
             2-Minute DJ
           </h1>
           <p className="text-neutral-400 text-lg">
-            High-energy music sharing party game.
+            {language === "de" ? "Das hochenergetische Musik-Party-Spiel." : "The high-energy music party game."}
           </p>
         </div>
 
@@ -30,8 +51,8 @@ export default function Home() {
                 <Monitor size={24} className="text-indigo-400" />
               </div>
               <div className="text-left">
-                <h3 className="font-bold text-xl">Host a Game</h3>
-                <p className="text-neutral-500 text-sm group-hover:text-neutral-400">Use this device as the TV</p>
+                <h3 className="font-bold text-xl">{t("hostGame")}</h3>
+                <p className="text-neutral-500 text-sm group-hover:text-neutral-400">{t("hostDesc")}</p>
               </div>
             </div>
             <div className="text-neutral-600 group-hover:text-indigo-400 transition-colors">→</div>
@@ -46,8 +67,8 @@ export default function Home() {
                 <Smartphone size={24} className="text-purple-400" />
               </div>
               <div className="text-left">
-                <h3 className="font-bold text-xl">Join Game</h3>
-                <p className="text-neutral-500 text-sm group-hover:text-neutral-400">Use your phone to play</p>
+                <h3 className="font-bold text-xl">{t("joinGame")}</h3>
+                <p className="text-neutral-500 text-sm group-hover:text-neutral-400">{t("joinDesc")}</p>
               </div>
             </div>
             <div className="text-neutral-600 group-hover:text-purple-400 transition-colors">→</div>
@@ -56,7 +77,7 @@ export default function Home() {
       </div>
       
       <div className="absolute bottom-8 text-neutral-600 text-sm">
-        Powered by InstantDB
+        {t("poweredBy")}
       </div>
     </div>
   );

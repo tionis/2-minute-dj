@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import { ArrowRight, Search, Link as LinkIcon, Info } from "lucide-react";
+import { useI18n } from "@/components/LanguageProvider";
 
 interface SearchStepProps {
   onNext: (videoId: string, startTime: number, title: string) => void;
 }
 
 export default function SearchStep({ onNext }: SearchStepProps) {
+  const { t, language } = useI18n();
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -17,21 +19,18 @@ export default function SearchStep({ onNext }: SearchStepProps) {
     let startTime = 0;
 
     try {
-        // 1. Try to extract Video ID using Regex
         const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
         const match = input.match(regExp);
         if (match && match[2].length === 11) {
             videoId = match[2];
         }
 
-        // 2. Try to extract Time
         const safeUrl = input.startsWith("http") ? input : `https://${input}`;
         const urlObj = new URL(safeUrl);
         
         const timeParam = urlObj.searchParams.get("t") || urlObj.searchParams.get("start");
         
         if (timeParam) {
-            // Regex for 1h2m30s format
             const hours = timeParam.match(/(\d+)h/);
             const mins = timeParam.match(/(\d+)m/);
             const secs = timeParam.match(/(\d+)s/);
@@ -42,7 +41,6 @@ export default function SearchStep({ onNext }: SearchStepProps) {
                     (mins ? parseInt(mins[1]) * 60 : 0) +
                     (secs ? parseInt(secs[1]) : 0);
             } else {
-                // Raw seconds
                 startTime = parseInt(timeParam);
             }
         }
@@ -62,24 +60,24 @@ export default function SearchStep({ onNext }: SearchStepProps) {
       try {
         const response = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${videoId}`);
         const data = await response.json();
-        const title = data.title || "Unknown Title";
+        const title = data.title || (language === "de" ? "Unbekannter Titel" : "Unknown Title");
         onNext(videoId, startTime, title);
       } catch (err) {
         console.error("Failed to fetch title", err);
-        onNext(videoId, startTime, "Unknown Title");
+        onNext(videoId, startTime, language === "de" ? "Unbekannter Titel" : "Unknown Title");
       } finally {
         setLoading(false);
       }
     } else {
-      setError("Invalid YouTube URL. Try again.");
+      setError(language === "de" ? "Ungültige YouTube-URL. Versuche es erneut." : "Invalid YouTube URL. Try again.");
     }
   };
 
   return (
     <div className="w-full max-w-md space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold">Pick a Song</h2>
-        <p className="text-neutral-400 text-sm">Paste a YouTube link.</p>
+        <h2 className="text-2xl font-bold">{t("pickSong")}</h2>
+        <p className="text-neutral-400 text-sm">{t("pasteLink")}</p>
       </div>
 
       <form onSubmit={handleSearch} className="space-y-4">
@@ -100,10 +98,10 @@ export default function SearchStep({ onNext }: SearchStepProps) {
         </div>
 
         {/* Tip */}
-        <div className="bg-blue-500/10 p-4 rounded-xl flex items-start space-x-3 text-sm text-blue-200">
+        <div className="bg-blue-500/10 p-4 rounded-xl flex items-start space-x-3 text-sm text-blue-200 text-left">
             <Info className="shrink-0 mt-0.5" size={16} />
             <p>
-                <strong>Tip:</strong> Want to start at a specific part? Use the "Start at" checkbox when sharing from YouTube, or add <code className="bg-black/30 px-1 rounded">?t=1m20s</code> to the link.
+                <strong>Tip:</strong> {language === "de" ? "Willst du an einer bestimmten Stelle starten? Nutze das 'Starten bei' Häkchen beim Teilen auf YouTube oder füge " : "Want to start at a specific part? Use the 'Start at' checkbox when sharing from YouTube, or add "}<code className="bg-black/30 px-1 rounded">?t=1m20s</code> {language === "de" ? "am Ende des Links hinzu." : "to the link."}
             </p>
         </div>
 
@@ -119,10 +117,10 @@ export default function SearchStep({ onNext }: SearchStepProps) {
           className="w-full bg-white text-black font-bold text-lg p-4 rounded-xl hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center space-x-2"
         >
           {loading ? (
-             <span>Loading...</span>
+             <span>{language === "de" ? "Lädt..." : "Loading..."}</span>
           ) : (
              <>
-                <span>Preview Song</span>
+                <span>{t("previewSong")}</span>
                 <ArrowRight size={20} />
              </>
           )}

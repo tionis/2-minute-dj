@@ -5,6 +5,7 @@ import { InstaQLEntity } from "@instantdb/react";
 import { Music, Trophy, ExternalLink, RotateCcw, ThumbsUp, Share, Download } from "lucide-react";
 import { useState } from "react";
 import AlertModal from "@/components/ui/AlertModal";
+import { useI18n } from "@/components/LanguageProvider";
 
 type Room = InstaQLEntity<AppSchema, "rooms">;
 type Player = InstaQLEntity<AppSchema, "players">;
@@ -15,6 +16,7 @@ interface SummaryViewProps {
 }
 
 export default function SummaryView({ room }: SummaryViewProps) {
+  const { t, language } = useI18n();
   const [showLinkAlert, setShowLinkAlert] = useState(false);
 
   const playedSongs = room.queue_items
@@ -40,7 +42,7 @@ export default function SummaryView({ room }: SummaryViewProps) {
   };
 
   const handleCopyLink = () => {
-      const url = `${window.location.origin}/summary/${room.id}`;
+      const url = `${typeof window !== "undefined" ? window.location.origin : ""}/summary/${room.id}`;
       navigator.clipboard.writeText(url);
       setShowLinkAlert(true);
   };
@@ -53,9 +55,9 @@ export default function SummaryView({ room }: SummaryViewProps) {
         <div className="inline-block p-4 rounded-full bg-yellow-500/10 text-yellow-500 mb-2">
             <Trophy size={48} />
         </div>
-        <h1 className="text-6xl font-black tracking-tighter">Session Summary</h1>
+        <h1 className="text-6xl font-black tracking-tighter">{t("sessionSummary")}</h1>
         <p className="text-neutral-500 text-xl font-medium">
-            {playedSongs.length} tracks shared. What a set!
+            {playedSongs.length} {t("tracksShared")}
         </p>
       </div>
 
@@ -64,7 +66,7 @@ export default function SummaryView({ room }: SummaryViewProps) {
         <div className="space-y-4">
             {playedSongs.length === 0 ? (
                 <div className="text-center py-12 text-neutral-600 italic">
-                    No songs were played in this session.
+                    {t("noSongsPlayed")}
                 </div>
             ) : (
                 playedSongs.map((song, index) => {
@@ -80,13 +82,13 @@ export default function SummaryView({ room }: SummaryViewProps) {
                                 </div>
                                 <div className="truncate">
                                     <h3 className="font-bold text-lg flex items-center space-x-2">
-                                        <span className="truncate">{song.video_title || `ID: ${song.video_id}`}</span>
+                                        <span className="truncate">{song.video_title || `${t("unknownTrack")} (${song.video_id})`}</span>
                                         {song.status === "SKIPPED" && (
-                                            <span className="text-[10px] uppercase tracking-widest bg-red-500/20 text-red-500 px-2 py-0.5 rounded-full font-bold">Skipped</span>
+                                            <span className="text-[10px] uppercase tracking-widest bg-red-500/20 text-red-500 px-2 py-0.5 rounded-full font-bold">{t("skipped")}</span>
                                         )}
                                     </h3>
                                     <p className="text-neutral-500 text-sm font-medium">
-                                        DJ { (song as any).player?.nickname || "Unknown" }
+                                        DJ { (song as any).player?.nickname || t("unknownDj") }
                                     </p>
                                 </div>
                             </div>
@@ -122,11 +124,11 @@ export default function SummaryView({ room }: SummaryViewProps) {
       {/* Action */}
       <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
         <button 
-            onClick={() => window.location.reload()}
+            onClick={() => typeof window !== "undefined" && window.location.reload()}
             className="flex items-center space-x-2 px-8 py-4 rounded-full bg-white text-black font-bold text-lg hover:bg-neutral-200 transition-all"
         >
             <RotateCcw size={20} />
-            <span>New Session</span>
+            <span>{t("newSession")}</span>
         </button>
 
         <button 
@@ -134,7 +136,7 @@ export default function SummaryView({ room }: SummaryViewProps) {
             className="flex items-center space-x-2 px-8 py-4 rounded-full border border-neutral-700 text-neutral-300 font-bold text-lg hover:bg-neutral-800 transition-all"
         >
             <Share size={20} />
-            <span>Share Link</span>
+            <span>{t("shareLink")}</span>
         </button>
 
         <button 
@@ -142,15 +144,16 @@ export default function SummaryView({ room }: SummaryViewProps) {
             className="flex items-center space-x-2 px-8 py-4 rounded-full border border-neutral-700 text-neutral-300 font-bold text-lg hover:bg-neutral-800 transition-all"
         >
             <Download size={20} />
-            <span>JSON</span>
+            <span>{t("json")}</span>
         </button>
       </div>
 
       <AlertModal
         isOpen={showLinkAlert}
         onClose={() => setShowLinkAlert(false)}
-        title="Link Copied"
-        description="The summary link has been copied to your clipboard."
+        title={language === "de" ? "Link kopiert" : "Link Copied"}
+        description={language === "de" ? "Der Link zur Zusammenfassung wurde in die Zwischenablage kopiert." : "The summary link has been copied to your clipboard."}
+        buttonText={t("confirm")}
       />
     </div>
   );

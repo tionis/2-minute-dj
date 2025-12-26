@@ -6,6 +6,7 @@ import { InstaQLEntity } from "@instantdb/react";
 import { SkipForward, Pause, Play, Users, Clock, Trash2, Crown, Plus } from "lucide-react";
 import { useState } from "react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
+import { useI18n } from "@/components/LanguageProvider";
 
 type Room = InstaQLEntity<AppSchema, "rooms">;
 type Player = InstaQLEntity<AppSchema, "players">;
@@ -17,12 +18,11 @@ interface VIPControlsProps {
 }
 
 export default function VIPControls({ room, queueItems }: VIPControlsProps) {
+  const { t, language } = useI18n();
   const [kickPlayerId, setKickPlayerId] = useState<string | null>(null);
   const [kickPlayerName, setKickPlayerName] = useState("");
 
   const handleSkip = () => {
-    // Replicate skip logic client-side
-    // 1. Mark current as PLAYED
     const activeItem = queueItems.find(q => q.id === room.active_player_id);
     const txs = [];
     
@@ -30,10 +30,8 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
         txs.push(db.tx.queue_items[activeItem.id].update({ status: "PLAYED" }));
     }
 
-    // 2. Find next
     const pendingItems = queueItems.filter(q => q.status === "PENDING");
     if (pendingItems.length === 0) {
-        // Pause
         txs.push(db.tx.rooms[room.id].update({
             current_video_id: null,
             active_player_id: null,
@@ -59,7 +57,6 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
               paused_at: Date.now()
           }));
       } else {
-          // Resume
           const pauseDuration = room.paused_at ? Date.now() - room.paused_at : 0;
           const newStart = (room.playback_started_at || Date.now()) + pauseDuration;
           
@@ -97,7 +94,7 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
     <div className="bg-neutral-900 border border-yellow-500/30 rounded-2xl p-4 space-y-6 mt-8">
         <div className="flex items-center space-x-2 text-yellow-500 font-bold uppercase tracking-widest text-xs border-b border-neutral-800 pb-2">
             <Crown size={14} fill="currentColor" />
-            <span>VIP Controls</span>
+            <span>{t("toggleVip")}</span>
         </div>
 
         {/* Playback Controls */}
@@ -111,7 +108,7 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
                 }`}
             >
                 {room.status === "PAUSED" ? <Play size={20} fill="currentColor" /> : <Pause size={20} fill="currentColor" />}
-                <span>{room.status === "PAUSED" ? "Resume" : "Pause"}</span>
+                <span>{room.status === "PAUSED" ? (language === "de" ? "Fortsetzen" : "Resume") : (language === "de" ? "Pause" : "Pause")}</span>
             </button>
 
             <button 
@@ -119,7 +116,7 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
                 className="p-4 rounded-xl bg-neutral-800 text-neutral-300 hover:bg-neutral-700 font-bold flex items-center justify-center space-x-2 transition-all"
             >
                 <SkipForward size={20} fill="currentColor" />
-                <span>Skip</span>
+                <span>{language === "de" ? "Überspringen" : "Skip"}</span>
             </button>
         </div>
 
@@ -127,7 +124,7 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
         <div className="space-y-3">
             <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 flex items-center space-x-1">
                 <Clock size={10} />
-                <span>Round Timer</span>
+                <span>{t("timerDuration")}</span>
             </label>
             <div className="grid grid-cols-4 gap-2">
                 {[60, 90, 120, 180].map((sec) => (
@@ -151,7 +148,7 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
                 className="w-full py-2.5 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 font-bold text-xs flex items-center justify-center space-x-2 hover:bg-indigo-500/20 transition-all"
             >
                 <Plus size={14} />
-                <span>Add 30s to Round</span>
+                <span>{language === "de" ? "30s zur Runde hinzufügen" : "Add 30s to Round"}</span>
             </button>
         </div>
 
@@ -159,7 +156,7 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
         <div className="space-y-2">
             <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 flex items-center space-x-1">
                 <Users size={10} />
-                <span>Manage Players</span>
+                <span>{t("managePlayers")}</span>
             </label>
             <div className="max-h-40 overflow-y-auto space-y-2 pr-1">
                 {room.players.map((p) => (
@@ -180,10 +177,10 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
             isOpen={!!kickPlayerId}
             onCancel={() => setKickPlayerId(null)}
             onConfirm={confirmKick}
-            title={`Kick ${kickPlayerName}?`}
-            description="Are you sure you want to kick this player?"
-            confirmText="Kick"
-            cancelText="Cancel"
+            title={`${t("kick")} ${kickPlayerName}?`}
+            description={language === "de" ? "Bist du sicher, dass du diesen Spieler hinauswerfen willst?" : "Are you sure you want to kick this player?"}
+            confirmText={t("kick")}
+            cancelText={t("cancel")}
         />
     </div>
   );

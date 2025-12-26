@@ -6,13 +6,15 @@ import { useEffect, useState } from "react";
 import { db } from "@/lib/db";
 import { generateRoomCode } from "@/lib/utils";
 import { id } from "@instantdb/react";
-import { Copy, Users, Play, Loader2, X, Crown, LogOut } from "lucide-react";
+import { Copy, Users, Play, Loader2, X, Crown, LogOut, Languages } from "lucide-react";
 import GameView from "@/components/host/GameView";
 import SummaryView from "@/components/host/SummaryView";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { QRCodeSVG } from "qrcode.react";
+import { useI18n } from "@/components/LanguageProvider";
 
 export default function HostPage() {
+  const { t, language, setLanguage } = useI18n();
   const [roomId, setRoomId] = useState<string | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [origin, setOrigin] = useState("");
@@ -38,7 +40,7 @@ export default function HostPage() {
 
   // Create room on mount or restore from local storage
   useEffect(() => {
-    setOrigin(window.location.origin);
+    setOrigin(typeof window !== "undefined" ? window.location.origin : "");
     
     const savedRoomId = localStorage.getItem("2mdj_host_roomId");
     const savedRoomCode = localStorage.getItem("2mdj_host_roomCode");
@@ -119,15 +121,35 @@ export default function HostPage() {
     );
   };
 
+  const renderLangSwitcher = () => (
+    <div className="flex items-center space-x-2 bg-neutral-900/50 p-1 rounded-full border border-neutral-800">
+        <button 
+          onClick={() => setLanguage("en")}
+          className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition-all ${language === "en" ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "text-neutral-500 hover:text-neutral-300"}`}
+        >
+          EN
+        </button>
+        <button 
+          onClick={() => setLanguage("de")}
+          className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition-all ${language === "de" ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "text-neutral-500 hover:text-neutral-300"}`}
+        >
+          DE
+        </button>
+    </div>
+  );
+
   if (room?.status === "PLAYING") {
     return (
       <div className="h-screen bg-neutral-950 text-white flex flex-col items-center justify-center p-6 relative">
-        <div className="absolute top-6 left-6 z-50 cursor-pointer" onClick={() => setShowQuitModal(true)}>
-            <div className="flex items-center space-x-2 text-neutral-500 hover:text-white transition-colors opacity-50 hover:opacity-100">
-                <div className="p-2 rounded-full bg-neutral-900 border border-neutral-800">
-                    <LogOut size={16} /> 
+        <div className="absolute top-6 left-6 z-50 flex items-center space-x-4">
+            <div className="cursor-pointer" onClick={() => setShowQuitModal(true)}>
+                <div className="flex items-center space-x-2 text-neutral-500 hover:text-white transition-colors opacity-50 hover:opacity-100">
+                    <div className="p-2 rounded-full bg-neutral-900 border border-neutral-800">
+                        <LogOut size={16} /> 
+                    </div>
                 </div>
             </div>
+            {renderLangSwitcher()}
         </div>
         <div className="w-full max-w-7xl h-full flex flex-col justify-center">
             <GameView room={room as any} />
@@ -136,9 +158,10 @@ export default function HostPage() {
             isOpen={showQuitModal}
             onCancel={() => setShowQuitModal(false)}
             onConfirm={handleQuitConfirm}
-            title="End Party?"
-            description="This will disconnect all players and close the room. Are you sure?"
-            confirmText="End Party"
+            title={t("endParty")}
+            description={language === "de" ? "Dies wird alle Spieler trennen und den Raum schließen. Bist du sicher?" : "This will disconnect all players and close the room. Are you sure?"}
+            confirmText={t("endParty")}
+            cancelText={t("cancel")}
         />
       </div>
     );
@@ -147,22 +170,26 @@ export default function HostPage() {
   if (room?.status === "FINISHED") {
     return (
       <div className="min-h-screen bg-neutral-950 text-white p-12 overflow-y-auto relative">
-        <div className="absolute top-6 left-6 z-50 cursor-pointer" onClick={() => setShowQuitModal(true)}>
-            <div className="flex items-center space-x-2 text-neutral-500 hover:text-white transition-colors">
-                <div className="p-2 rounded-full bg-neutral-900 border border-neutral-800">
-                    <LogOut size={16} /> 
+        <div className="absolute top-6 left-6 z-50 flex items-center space-x-4">
+            <div className="cursor-pointer" onClick={() => setShowQuitModal(true)}>
+                <div className="flex items-center space-x-2 text-neutral-500 hover:text-white transition-colors">
+                    <div className="p-2 rounded-full bg-neutral-900 border border-neutral-800">
+                        <LogOut size={16} /> 
+                    </div>
+                    <span className="font-bold text-sm tracking-widest uppercase">EXIT</span>
                 </div>
-                <span className="font-bold text-sm tracking-widest">EXIT</span>
             </div>
+            {renderLangSwitcher()}
         </div>
         <SummaryView room={room as any} />
         <ConfirmationModal 
             isOpen={showQuitModal}
             onCancel={() => setShowQuitModal(false)}
             onConfirm={handleQuitConfirm}
-            title="Leave Summary?"
-            description="You are about to leave the results screen."
-            confirmText="Leave"
+            title={language === "de" ? "Zusammenfassung verlassen?" : "Leave Summary?"}
+            description={language === "de" ? "Du verlässt gerade den Ergebnisbildschirm." : "You are about to leave the results screen."}
+            confirmText={t("leave")}
+            cancelText={t("cancel")}
         />
       </div>
     );
@@ -171,32 +198,36 @@ export default function HostPage() {
   return (
     <div className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-center p-8 relative">
       {/* Home Button */}
-      <div className="absolute top-6 left-6 z-10 cursor-pointer" onClick={() => setShowQuitModal(true)}>
-        <div className="flex items-center space-x-2 text-neutral-500 hover:text-white transition-colors">
-            <div className="p-2 rounded-full bg-neutral-900 border border-neutral-800">
-                <LogOut size={16} /> 
+      <div className="absolute top-6 left-6 z-10 flex items-center space-x-4">
+        <div className="cursor-pointer" onClick={() => setShowQuitModal(true)}>
+            <div className="flex items-center space-x-2 text-neutral-500 hover:text-white transition-colors">
+                <div className="p-2 rounded-full bg-neutral-900 border border-neutral-800">
+                    <LogOut size={16} /> 
+                </div>
+                <span className="font-bold text-sm tracking-widest uppercase">EXIT</span>
             </div>
-            <span className="font-bold text-sm tracking-widest">EXIT</span>
         </div>
+        {renderLangSwitcher()}
       </div>
 
       <ConfirmationModal 
         isOpen={showQuitModal}
         onCancel={() => setShowQuitModal(false)}
         onConfirm={handleQuitConfirm}
-        title="Cancel Party?"
-        description="Are you sure you want to close this room? Players will be disconnected."
-        confirmText="Close Room"
+        title={language === "de" ? "Party abbrechen?" : "Cancel Party?"}
+        description={language === "de" ? "Bist du sicher, dass du diesen Raum schließen willst? Alle Spieler werden getrennt." : "Are you sure you want to close this room? Players will be disconnected."}
+        confirmText={t("confirm")}
+        cancelText={t("cancel")}
       />
 
       <ConfirmationModal 
         isOpen={!!kickPlayerId}
         onCancel={() => setKickPlayerId(null)}
         onConfirm={handleKickConfirm}
-        title={`Kick ${kickPlayerName}?`}
-        description="Are you sure you want to kick this player?"
-        confirmText="Kick"
-        cancelText="Cancel"
+        title={`${t("kick")} ${kickPlayerName}?`}
+        description={language === "de" ? "Bist du sicher, dass du diesen Spieler hinauswerfen willst?" : "Are you sure you want to kick this player?"}
+        confirmText={t("kick")}
+        cancelText={t("cancel")}
       />
 
       <div className="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-3 gap-12 items-center">
@@ -204,12 +235,12 @@ export default function HostPage() {
         {/* Left: Join Info */}
         <div className="lg:col-span-2 space-y-12 flex flex-col items-center lg:items-start">
             <div className="text-center lg:text-left space-y-4">
-                <h2 className="text-neutral-400 font-medium tracking-widest uppercase text-sm">Join the party at:</h2>
+                <h2 className="text-neutral-400 font-medium tracking-widest uppercase text-sm">{t("joinAt")}</h2>
                 <h1 className="text-4xl font-bold">{origin.replace(/^https?:\/\//, "")}</h1>
             </div>
 
             <div className="relative group cursor-pointer text-center lg:text-left" onClick={() => navigator.clipboard.writeText(roomCode || "")}>
-                <h2 className="text-neutral-500 font-bold uppercase text-xs tracking-[0.3em] mb-2">Room Code</h2>
+                <h2 className="text-neutral-500 font-bold uppercase text-xs tracking-[0.3em] mb-2">{t("roomCode")}</h2>
                 <h1 className="text-9xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-br from-indigo-400 to-purple-400 select-none leading-none">
                 {roomCode}
                 </h1>
@@ -221,7 +252,7 @@ export default function HostPage() {
                 onClick={startGame}
                 className="cursor-pointer px-12 py-6 bg-white text-black rounded-full font-bold text-2xl hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center space-x-3 shadow-[0_0_50px_rgba(255,255,255,0.1)]"
             >
-                <span>Start Party</span>
+                <span>{t("startParty")}</span>
                 <Play size={24} fill="currentColor" />
             </button>
         </div>
@@ -242,7 +273,7 @@ export default function HostPage() {
                     <Users size={24} />
                     <span className="font-bold text-2xl">{players.length}</span>
                 </div>
-                <p className="text-neutral-500 font-medium">DJs in the lobby</p>
+                <p className="text-neutral-500 font-medium">{t("playersJoined")}</p>
             </div>
         </div>
 
@@ -264,7 +295,7 @@ export default function HostPage() {
                             <button 
                                 onClick={() => handleToggleVIP(player)}
                                 className={`p-1 rounded-full hover:scale-110 transition-transform ${player.is_vip ? "bg-yellow-500 text-black" : "bg-neutral-700 text-neutral-400 hover:bg-yellow-500 hover:text-black"}`}
-                                title="Toggle VIP"
+                                title={t("toggleVip")}
                             >
                                 <Crown size={12} fill={player.is_vip ? "currentColor" : "none"} />
                             </button>
@@ -273,7 +304,7 @@ export default function HostPage() {
                             <button 
                                 onClick={() => handleKickClick(player.id, player.nickname)}
                                 className="bg-red-500 text-white p-1 rounded-full hover:scale-110 transition-transform"
-                                title="Kick Player"
+                                title={t("kick")}
                             >
                                 <X size={12} />
                             </button>

@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { db } from "@/lib/db";
 import { useSearchParams } from "next/navigation";
-import { Loader2, Music4, Radio } from "lucide-react";
+import { Loader2, Music4, Radio, Languages } from "lucide-react";
 import { Suspense, useState, useEffect } from "react";
 import { id } from "@instantdb/react";
 import SearchStep from "@/components/player/SearchStep";
@@ -16,8 +16,10 @@ import InputModal from "@/components/ui/InputModal";
 import VIPControls from "@/components/player/VIPControls";
 import { Slider } from "@/components/ui/slider";
 import SummaryView from "@/components/host/SummaryView";
+import { useI18n } from "@/components/LanguageProvider";
 
 function PlayContent() {
+  const { t, language, setLanguage } = useI18n();
   const searchParams = useSearchParams();
   const roomId = searchParams.get("roomId");
   const playerId = searchParams.get("playerId");
@@ -130,14 +132,34 @@ function PlayContent() {
       window.location.href = "/";
   };
 
+  const renderLangSwitcher = () => (
+    <div className="flex items-center space-x-2 bg-neutral-900/50 p-1 rounded-full border border-neutral-800">
+        <button 
+          onClick={() => setLanguage("en")}
+          className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition-all ${language === "en" ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "text-neutral-500 hover:text-neutral-300"}`}
+        >
+          EN
+        </button>
+        <button 
+          onClick={() => setLanguage("de")}
+          className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition-all ${language === "de" ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "text-neutral-500 hover:text-neutral-300"}`}
+        >
+          DE
+        </button>
+    </div>
+  );
+
   // Lobby View
   if (room.status === "LOBBY") {
     return (
       <div className="min-h-screen bg-neutral-950 text-white flex flex-col p-6">
         <header className="flex justify-between items-center mb-8 opacity-50">
-          <div className="flex items-center space-x-2 cursor-pointer" onClick={() => setShowQuitModal(true)}>
-             <Home size={16} />
-             <div className="font-mono text-xs">EXIT</div>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 cursor-pointer" onClick={() => setShowQuitModal(true)}>
+                <Home size={16} />
+                <div className="font-mono text-xs uppercase">EXIT</div>
+            </div>
+            {renderLangSwitcher()}
           </div>
           <div 
             className="flex items-center space-x-2 font-mono text-xs cursor-pointer hover:text-white transition-colors"
@@ -152,18 +174,21 @@ function PlayContent() {
             isOpen={showQuitModal}
             onCancel={() => setShowQuitModal(false)}
             onConfirm={handleQuitConfirm}
-            title="Leave Party?"
-            description="Are you sure you want to leave?"
-            confirmText="Leave"
+            title={t("leaveParty")}
+            description={t("leaveDesc")}
+            confirmText={t("leave")}
+            cancelText={t("cancel")}
         />
 
         <InputModal
             isOpen={showNameModal}
             onCancel={() => setShowNameModal(false)}
             onConfirm={handleChangeName}
-            title="Change Nickname"
-            placeholder="New name..."
+            title={t("changeName")}
+            placeholder={language === "de" ? "Neuer Name..." : "New name..."}
             initialValue={player.nickname}
+            confirmText={t("save")}
+            cancelText={t("cancel")}
         />
 
         <div className="flex-1 flex flex-col items-center justify-center space-y-8 text-center">
@@ -175,15 +200,15 @@ function PlayContent() {
           </div>
 
           <div className="space-y-2 max-w-xs">
-            <h2 className="text-2xl font-bold">You're in!</h2>
+            <h2 className="text-2xl font-bold">{language === "de" ? "Du bist drin!" : "You're in!"}</h2>
             <p className="text-neutral-500">
-              Waiting for the host to start the game. Get your favorite songs ready in your mind!
+              {language === "de" ? "Warte auf den Host, um das Spiel zu starten. Überleg dir schonmal deine Lieblingssongs!" : "Waiting for the host to start the game. Get your favorite songs ready in your mind!"}
             </p>
           </div>
 
           <div className="pt-8 flex items-center space-x-2 text-xs text-neutral-600 uppercase tracking-widest">
             <Music4 size={12} />
-            <span>Lobby Phase</span>
+            <span>{language === "de" ? "Lobby Phase" : "Lobby Phase"}</span>
           </div>
         </div>
       </div>
@@ -194,9 +219,12 @@ function PlayContent() {
     return (
       <div className="min-h-screen bg-neutral-950 text-white p-6 overflow-y-auto">
         <header className="flex justify-between items-center mb-8 opacity-50">
-          <div className="flex items-center space-x-2 cursor-pointer" onClick={() => setShowQuitModal(true)}>
-             <Home size={16} />
-             <div className="font-mono text-xs">EXIT</div>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 cursor-pointer" onClick={() => setShowQuitModal(true)}>
+                <Home size={16} />
+                <div className="font-mono text-xs uppercase">EXIT</div>
+            </div>
+            {renderLangSwitcher()}
           </div>
           <div 
             className="flex items-center space-x-2 font-mono text-xs cursor-pointer hover:text-white transition-colors"
@@ -211,17 +239,20 @@ function PlayContent() {
             isOpen={showQuitModal}
             onCancel={() => setShowQuitModal(false)}
             onConfirm={handleQuitConfirm}
-            title="Leave Party?"
-            description="Are you sure you want to leave?"
-            confirmText="Leave"
+            title={t("leaveParty")}
+            description={t("leaveDesc")}
+            confirmText={t("leave")}
+            cancelText={t("cancel")}
         />
         <InputModal
             isOpen={showNameModal}
             onCancel={() => setShowNameModal(false)}
             onConfirm={handleChangeName}
-            title="Change Nickname"
-            placeholder="New name..."
+            title={t("changeName")}
+            placeholder={language === "de" ? "Neuer Name..." : "New name..."}
             initialValue={player.nickname}
+            confirmText={t("save")}
+            cancelText={t("cancel")}
         />
       </div>
     );
@@ -232,10 +263,13 @@ function PlayContent() {
     <div className="min-h-screen bg-neutral-950 text-white flex flex-col p-6">
       <header className="flex flex-col space-y-4 mb-8 opacity-100">
         <div className="flex justify-between items-center opacity-50">
-            <div className="flex items-center space-x-2 cursor-pointer" onClick={() => setShowQuitModal(true)}>
-                <Home size={16} />
+            <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2 cursor-pointer" onClick={() => setShowQuitModal(true)}>
+                    <Home size={16} />
+                </div>
+                {renderLangSwitcher()}
             </div>
-            <div className="font-mono text-xs font-bold text-indigo-400">2-MINUTE DJ</div>
+            <div className="font-mono text-xs font-bold text-indigo-400 uppercase tracking-widest">2-MINUTE DJ</div>
             <div 
                 className="flex items-center space-x-2 font-mono text-xs cursor-pointer hover:text-white transition-colors"
                 onClick={() => setShowNameModal(true)}
@@ -250,8 +284,8 @@ function PlayContent() {
             <div className="bg-neutral-900/80 p-4 rounded-2xl flex flex-col space-y-4 border border-neutral-800 animate-in slide-in-from-top-2">
                 <div className="flex items-center justify-between">
                     <div className="flex flex-col overflow-hidden mr-4">
-                        <span className="text-[10px] uppercase tracking-widest text-neutral-500 font-bold">Now Playing</span>
-                        <span className="text-sm font-bold truncate text-white">{activeQueueItem.video_title || "Unknown Track"}</span>
+                        <span className="text-[10px] uppercase tracking-widest text-neutral-500 font-bold">{t("nowSpinning")}</span>
+                        <span className="text-sm font-bold truncate text-white">{activeQueueItem.video_title || t("unknownTrack")}</span>
                     </div>
                     <div className={`text-xl font-bold transition-colors ${localVote > 75 ? 'text-green-500' : localVote < 25 ? 'text-red-500' : 'text-neutral-400'}`}>
                         {localVote}%
@@ -264,7 +298,6 @@ function PlayContent() {
                         className={`transition-colors ${localVote < 25 ? "text-red-500 fill-current" : "text-neutral-600"}`} 
                     />
                     <div className="flex-1 relative h-6 flex items-center">
-                        {/* Gradient Track */}
                         <div className="absolute inset-0 h-2 bg-gradient-to-r from-red-900 via-neutral-700 to-green-900 rounded-full my-auto" />
                         <Slider 
                             min={0}
@@ -289,27 +322,31 @@ function PlayContent() {
         isOpen={showQuitModal}
         onCancel={() => setShowQuitModal(false)}
         onConfirm={handleQuitConfirm}
-        title="Leave Party?"
-        description="Are you sure you want to leave the game?"
-        confirmText="Leave"
+        title={t("leaveParty")}
+        description={t("leaveDesc")}
+        confirmText={t("leave")}
+        cancelText={t("cancel")}
       />
 
       <ConfirmationModal 
         isOpen={!!deleteItemId}
         onCancel={() => setDeleteItem(null)}
         onConfirm={handleDeleteConfirm}
-        title="Delete Song?"
-        description="Are you sure you want to remove this song from your queue?"
-        confirmText="Delete"
+        title={language === "de" ? "Song löschen?" : "Delete Song?"}
+        description={language === "de" ? "Bist du sicher, dass du diesen Song aus deiner Warteschlange entfernen willst?" : "Are you sure you want to remove this song from your queue?"}
+        confirmText={language === "de" ? "Löschen" : "Delete"}
+        cancelText={t("cancel")}
       />
 
       <InputModal
         isOpen={showNameModal}
         onCancel={() => setShowNameModal(false)}
         onConfirm={handleChangeName}
-        title="Change Nickname"
-        placeholder="New name..."
+        title={t("changeName")}
+        placeholder={language === "de" ? "Neuer Name..." : "New name..."}
         initialValue={player.nickname}
+        confirmText={t("save")}
+        cancelText={t("cancel")}
       />
 
       <div className="flex-1 flex flex-col">
@@ -344,7 +381,7 @@ function PlayContent() {
         {/* My Queue Section - Always Visible */}
         {myQueue.length > 0 && (
             <div className="w-full max-w-md mx-auto bg-neutral-900/50 rounded-2xl border border-neutral-800 p-4 mb-4">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-4">My Upcoming Tracks</h3>
+                <h3 className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-4">{t("myQueue")}</h3>
                 <div className="space-y-3">
                     {myQueue.map((item) => (
                         <div key={item.id} className="flex items-center justify-between bg-neutral-800 p-3 rounded-xl">
@@ -355,7 +392,7 @@ function PlayContent() {
                                 />
                                 <div className="flex flex-col overflow-hidden">
                                     <span className="text-xs font-bold truncate text-white">
-                                        {item.video_title || "Unknown Track"}
+                                        {item.video_title || t("unknownTrack")}
                                     </span>
                                     <span className="text-xs font-mono truncate text-neutral-400">
                                         Start: {Math.floor(item.highlight_start / 60)}:{(item.highlight_start % 60).toString().padStart(2, "0")}
