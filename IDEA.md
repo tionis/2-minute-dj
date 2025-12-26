@@ -100,10 +100,37 @@ Since we are using a serverless DB (InstantDB) without a dedicated backend worke
 
 ### Phase 4: Polish & "Juice"
 
-1. **QR Code:** Host displays a QR code for the join URL.
-2. **Sleep Prevention:** Use `navigator.wakeLock` on the Phone client.
-3. **Visuals:** Dark mode interface. Large typography on TV.
-4. **Skip Button:** If the song is bad, the Host (or a majority vote from Phones) can trigger the "Next Song" logic immediately.
+
+
+
+
+
+
+1.  **QR Code:** Host displays a QR code for the join URL.
+
+
+
+2.  **Sleep Prevention:** Use `navigator.wakeLock` on the Phone client.
+
+
+
+3.  **Visuals:** Dark mode interface. Large typography on TV.
+
+
+
+4.  **Skip Button:** If the song is bad, the Host (or a majority vote from Phones) can trigger the "Next Song" logic immediately.
+
+
+
+5.  **Post-Game Summary:** Display a list of all songs played during the session after it ends.
+
+
+
+6.  **Connection Stability:** Ensure the web app handles connection drops (e.g., mobile device locking) gracefully, restoring the session upon reconnection.
+
+
+
+
 
 ---
 
