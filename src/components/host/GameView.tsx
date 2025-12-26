@@ -8,6 +8,7 @@ import { InstaQLEntity } from "@instantdb/react";
 import { Loader2, Music, User, SkipForward, Clock, Play, Settings, X, Crown } from "lucide-react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useI18n } from "@/components/LanguageProvider";
+import HypeMeter from "./HypeMeter";
 
 const ReactPlayer = dynamic(() => import("react-player"), { ssr: false });
 
@@ -300,6 +301,13 @@ export default function GameView({ room }: GameViewProps) {
         {!isPlayerReady && <div className="absolute inset-0 z-30 bg-neutral-900 flex items-center justify-center"><Loader2 className="animate-spin text-indigo-500" size={48} /></div>}
         <iframe key={room.current_video_id} className="absolute inset-0 w-full h-full border-none" src={`https://www.youtube.com/embed/${room.current_video_id}?autoplay=1&start=${room.current_start_time}&controls=0&modestbranding=1&rel=0`} title="YouTube video player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" onLoad={() => setIsPlayerReady(true)} />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
+        
+        {/* Hype Meter Overlay */}
+        {activeQueueItem && (
+            <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 w-full max-w-xl px-6">
+                <HypeMeter votes={activeQueueItem.votes as any} />
+            </div>
+        )}
       </div>
       <div className="flex items-center justify-between px-4 py-4 shrink-0 h-20">
         <div className="flex items-center space-x-8 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setShowPlayers(true)}>

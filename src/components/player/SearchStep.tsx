@@ -105,6 +105,15 @@ export default function SearchStep({ onNext }: SearchStepProps) {
             </p>
         </div>
 
+        <a 
+            href="https://www.youtube.com" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="block w-full text-center text-xs font-bold uppercase tracking-widest text-neutral-500 hover:text-white transition-colors py-2"
+        >
+            {language === "de" ? "YouTube öffnen & suchen" : "Open YouTube to Search"}
+        </a>
+
         {error && (
           <p className="text-red-400 text-sm text-center bg-red-500/10 p-2 rounded-lg">
             {error}

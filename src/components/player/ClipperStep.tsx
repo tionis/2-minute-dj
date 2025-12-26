@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Slider } from "@/components/ui/slider";
-import { Loader2, Music2, Check, Play, Pause } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useState, useRef } from "react";
+import dynamic from "next/dynamic";
+import { Loader2, Check } from "lucide-react";
 import { useI18n } from "@/components/LanguageProvider";
+
+// Import ReactPlayer dynamically to avoid SSR issues
+const ReactPlayer = dynamic(() => import("react-player"), { ssr: false }) as any;
 
 interface ClipperStepProps {
   videoId: string;
@@ -14,11 +16,11 @@ interface ClipperStepProps {
 
 export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepProps) {
   const { t, language } = useI18n();
-  const [duration, setDuration] = useState<number>(600); // Default to 10 mins
+  const [duration, setDuration] = useState<number>(0); 
   const [startTime, setStartTime] = useState<number>(0);
-  const [previewTime, setPreviewTime] = useState<number>(0); 
-  const [isReady, setIsReady] = useState(false); // Used for iframe load
-  
+  const [isReady, setIsReady] = useState(false);
+  const playerRef = useRef<any>(null);
+
   // Constants
   const WINDOW_SIZE = 120; // 2 minutes
 
@@ -31,14 +33,16 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newStart = Number(e.target.value);
     setStartTime(newStart);
+    // Real-time seeking
+    if (playerRef.current) {
+        playerRef.current.seekTo(newStart, "seconds");
+    }
   };
 
-  const handleSliderCommit = () => {
-    setPreviewTime(startTime);
-    setIsReady(false); // Show loader while iframe updates/reloads
+  // When player loads duration
+  const handleDuration = (d: number) => {
+      setDuration(d);
   };
-
-  const maxStart = duration; 
 
   return (
     <div className="w-full max-w-md space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -54,16 +58,26 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
           </div>
         )}
 
-        <iframe
-            key={previewTime} // Reload on commit
+        <ReactPlayer
+            ref={playerRef}
+            url={`https://www.youtube.com/watch?v=${videoId}`}
             width="100%"
             height="100%"
-            src={`https://www.youtube.com/embed/${videoId}?start=${previewTime}&autoplay=1&controls=0&modestbranding=1&rel=0`}
-            title="Preview"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            className="border-none"
-            onLoad={() => setIsReady(true)}
+            playing={true}
+            controls={false}
+            onReady={() => setIsReady(true)}
+            onDuration={handleDuration}
+            config={{
+                youtube: {
+                    playerVars: { modestbranding: 1, rel: 0 }
+                }
+            } as any}
         />
+        
+        {/* Helper overlay to show it's a preview */}
+        <div className="absolute top-2 right-2 bg-black/50 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-widest text-white/50 pointer-events-none">
+            Preview
+        </div>
       </div>
 
       <div className="space-y-6">
@@ -73,27 +87,30 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
           </div>
 
           <div className="relative pt-6 pb-2">
+             {/* Duration Bar */}
              <div className="absolute top-0 left-0 right-0 h-2 bg-neutral-800 rounded-full overflow-hidden">
-                <div 
-                    className="absolute h-full bg-indigo-500/30"
-                    style={{
-                        left: `${(startTime / duration) * 100}%`,
-                        width: `${(WINDOW_SIZE / duration) * 100}%`
-                    }}
-                />
+                {duration > 0 && (
+                    <div 
+                        className="absolute h-full bg-indigo-500/30 transition-all duration-75"
+                        style={{
+                            left: `${(startTime / duration) * 100}%`,
+                            width: `${Math.min(100, (WINDOW_SIZE / duration) * 100)}%`
+                        }}
+                    />
+                )}
              </div>
              
-             <Slider
+             <input
+                type="range"
                 min={0}
-                max={maxStart}
+                max={duration || 100} // Fallback until duration loads
+                step={1}
                 value={startTime}
                 onChange={handleSliderChange}
-                onMouseUp={handleSliderCommit}
-                onTouchEnd={handleSliderCommit}
-                className="relative z-10"
+                className="w-full h-2 bg-transparent appearance-none cursor-pointer relative z-10 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:bg-indigo-500 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-lg hover:[&::-webkit-slider-thumb]:scale-110 transition-all"
               />
               <p className="text-xs text-neutral-500 text-center mt-2">
-                {language === "de" ? "Regler loslassen, um Vorschau zu aktualisieren" : "Release slider to update preview"}
+                {language === "de" ? "Ziehen, um Startzeit zu wählen" : "Drag to pick start time"}
               </p>
           </div>
 
