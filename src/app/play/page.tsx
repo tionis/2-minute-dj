@@ -5,14 +5,17 @@ export const dynamic = "force-dynamic";
 import { db } from "@/lib/db";
 import { useSearchParams } from "next/navigation";
 import { Loader2, Music4, Radio } from "lucide-react";
-import { Suspense, useState } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { id } from "@instantdb/react";
-import VIPControls from "@/components/player/VIPControls";
 import SearchStep from "@/components/player/SearchStep";
 import ClipperStep from "@/components/player/ClipperStep";
 import SuccessStep from "@/components/player/SuccessStep";
-import { Trash2, Home } from "lucide-react";
+import { Trash2, Home, ThumbsUp, ThumbsDown, Edit2 } from "lucide-react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
+import InputModal from "@/components/ui/InputModal";
+import VIPControls from "@/components/player/VIPControls";
+import { Slider } from "@/components/ui/slider";
+import SummaryView from "@/components/host/SummaryView";
 
 function PlayContent() {
   const searchParams = useSearchParams();
@@ -23,26 +26,45 @@ function PlayContent() {
   const [step, setStep] = useState<"SEARCH" | "CLIP" | "SUCCESS">("SEARCH");
   const [videoData, setVideoData] = useState<{ id: string, startTime: number, title: string } | null>(null);
   const [showQuitModal, setShowQuitModal] = useState(false);
+  const [showNameModal, setShowNameModal] = useState(false);
+  const [deleteItemId, setDeleteItem] = useState<string | null>(null);
+  const [localVote, setLocalVote] = useState(50);
 
   const { data, isLoading, error } = db.useQuery(
     roomId && playerId
       ? {
           rooms: {
             $: { where: { id: roomId } },
-            players: {}, // All players for VIP
-            queue_items: { // All pending songs for VIP skip logic
-                 $: { where: { status: "PENDING" } }
+            players: {}, 
+            queue_items: { 
+                 $: { where: {  } } 
             }
           },
           players: {
             $: { where: { id: playerId } },
-            queue_items: { // My songs for My Queue
+            queue_items: { 
                 $: { where: { status: "PENDING" } }
             }
           },
         }
       : null
   );
+
+  const room = data?.rooms?.[0];
+  const player = data?.players?.[0];
+  const myQueue = player?.queue_items || [];
+  const isVip = player?.is_vip || false;
+  
+  const activeQueueItem = room?.queue_items?.find(q => q.id === room.active_player_id);
+
+  // Sync local vote with DB when song changes or DB updates
+  useEffect(() => {
+      if (player && activeQueueItem?.votes?.[player.id] !== undefined) {
+          setLocalVote(activeQueueItem.votes[player.id]);
+      } else {
+          setLocalVote(50);
+      }
+  }, [activeQueueItem?.id, player?.id]);
 
   if (!roomId || !playerId) {
     return <div className="text-white p-8">Missing parameters. Please join again.</div>;
@@ -60,16 +82,17 @@ function PlayContent() {
     return <div className="text-red-500 p-8">Error: {error.message}</div>;
   }
 
-  const room = data?.rooms[0];
-  const player = data?.players[0];
-  const myQueue = player?.queue_items || [];
-  const isVip = player?.is_vip || false;
-
   if (!room || !player) {
     return <div className="text-white p-8">Room or Player not found.</div>;
   }
 
-  // Handle Queueing
+  const commitVote = () => {
+      if (!activeQueueItem) return;
+      const currentVotes = activeQueueItem.votes || {};
+      const newVotes = { ...currentVotes, [player.id]: localVote };
+      db.transact(db.tx.queue_items[activeQueueItem.id].update({ votes: newVotes }));
+  };
+
   const handleQueue = (startTime: number) => {
     if (!videoData) return;
 
@@ -77,7 +100,7 @@ function PlayContent() {
     db.transact(
         db.tx.queue_items[queueId].update({
             video_id: videoData.id,
-            video_title: videoData.title, // Save title
+            video_title: videoData.title,
             highlight_start: startTime,
             status: "PENDING",
             created_at: Date.now(),
@@ -87,10 +110,20 @@ function PlayContent() {
     setStep("SUCCESS");
   };
 
-  const handleDelete = (itemId: string) => {
-      if (confirm("Remove this song?")) {
-          db.transact(db.tx.queue_items[itemId].delete());
+  const handleDeleteClick = (itemId: string) => {
+      setDeleteItem(itemId);
+  };
+
+  const handleDeleteConfirm = () => {
+      if (deleteItemId) {
+          db.transact(db.tx.queue_items[deleteItemId].delete());
+          setDeleteItem(null);
       }
+  };
+
+  const handleChangeName = (newName: string) => {
+      db.transact(db.tx.players[player.id].update({ nickname: newName }));
+      setShowNameModal(false);
   };
 
   const handleQuitConfirm = () => {
@@ -106,7 +139,13 @@ function PlayContent() {
              <Home size={16} />
              <div className="font-mono text-xs">EXIT</div>
           </div>
-          <div className="font-mono text-xs">{player.nickname}</div>
+          <div 
+            className="flex items-center space-x-2 font-mono text-xs cursor-pointer hover:text-white transition-colors"
+            onClick={() => setShowNameModal(true)}
+          >
+            <span>{player.nickname}</span>
+            <Edit2 size={12} className="opacity-50" />
+          </div>
         </header>
 
         <ConfirmationModal 
@@ -116,6 +155,15 @@ function PlayContent() {
             title="Leave Party?"
             description="Are you sure you want to leave?"
             confirmText="Leave"
+        />
+
+        <InputModal
+            isOpen={showNameModal}
+            onCancel={() => setShowNameModal(false)}
+            onConfirm={handleChangeName}
+            title="Change Nickname"
+            placeholder="New name..."
+            initialValue={player.nickname}
         />
 
         <div className="flex-1 flex flex-col items-center justify-center space-y-8 text-center">
@@ -142,15 +190,99 @@ function PlayContent() {
     );
   }
 
+  if (room.status === "FINISHED") {
+    return (
+      <div className="min-h-screen bg-neutral-950 text-white p-6 overflow-y-auto">
+        <header className="flex justify-between items-center mb-8 opacity-50">
+          <div className="flex items-center space-x-2 cursor-pointer" onClick={() => setShowQuitModal(true)}>
+             <Home size={16} />
+             <div className="font-mono text-xs">EXIT</div>
+          </div>
+          <div 
+            className="flex items-center space-x-2 font-mono text-xs cursor-pointer hover:text-white transition-colors"
+            onClick={() => setShowNameModal(true)}
+          >
+            <span>{player.nickname}</span>
+            <Edit2 size={12} className="opacity-50" />
+          </div>
+        </header>
+        <SummaryView room={room as any} />
+        <ConfirmationModal 
+            isOpen={showQuitModal}
+            onCancel={() => setShowQuitModal(false)}
+            onConfirm={handleQuitConfirm}
+            title="Leave Party?"
+            description="Are you sure you want to leave?"
+            confirmText="Leave"
+        />
+        <InputModal
+            isOpen={showNameModal}
+            onCancel={() => setShowNameModal(false)}
+            onConfirm={handleChangeName}
+            title="Change Nickname"
+            placeholder="New name..."
+            initialValue={player.nickname}
+        />
+      </div>
+    );
+  }
+
   // Game View (PLAYING)
   return (
     <div className="min-h-screen bg-neutral-950 text-white flex flex-col p-6">
-      <header className="flex justify-between items-center mb-8 opacity-50">
-         <div className="flex items-center space-x-2 cursor-pointer" onClick={() => setShowQuitModal(true)}>
-             <Home size={16} />
-         </div>
-        <div className="font-mono text-xs font-bold text-indigo-400">2-MINUTE DJ</div>
-        <div className="font-mono text-xs">{player.nickname}</div>
+      <header className="flex flex-col space-y-4 mb-8 opacity-100">
+        <div className="flex justify-between items-center opacity-50">
+            <div className="flex items-center space-x-2 cursor-pointer" onClick={() => setShowQuitModal(true)}>
+                <Home size={16} />
+            </div>
+            <div className="font-mono text-xs font-bold text-indigo-400">2-MINUTE DJ</div>
+            <div 
+                className="flex items-center space-x-2 font-mono text-xs cursor-pointer hover:text-white transition-colors"
+                onClick={() => setShowNameModal(true)}
+            >
+                <span>{player.nickname}</span>
+                <Edit2 size={12} className="opacity-50" />
+            </div>
+        </div>
+
+        {/* Voting UI - Only when song is playing */}
+        {activeQueueItem && (
+            <div className="bg-neutral-900/80 p-4 rounded-2xl flex flex-col space-y-4 border border-neutral-800 animate-in slide-in-from-top-2">
+                <div className="flex items-center justify-between">
+                    <div className="flex flex-col overflow-hidden mr-4">
+                        <span className="text-[10px] uppercase tracking-widest text-neutral-500 font-bold">Now Playing</span>
+                        <span className="text-sm font-bold truncate text-white">{activeQueueItem.video_title || "Unknown Track"}</span>
+                    </div>
+                    <div className={`text-xl font-bold transition-colors ${localVote > 75 ? 'text-green-500' : localVote < 25 ? 'text-red-500' : 'text-neutral-400'}`}>
+                        {localVote}%
+                    </div>
+                </div>
+                
+                <div className="flex items-center space-x-3">
+                    <ThumbsDown 
+                        size={20} 
+                        className={`transition-colors ${localVote < 25 ? "text-red-500 fill-current" : "text-neutral-600"}`} 
+                    />
+                    <div className="flex-1 relative h-6 flex items-center">
+                        {/* Gradient Track */}
+                        <div className="absolute inset-0 h-2 bg-gradient-to-r from-red-900 via-neutral-700 to-green-900 rounded-full my-auto" />
+                        <Slider 
+                            min={0}
+                            max={100}
+                            value={localVote}
+                            onChange={(e) => setLocalVote(Number(e.target.value))}
+                            onMouseUp={commitVote}
+                            onTouchEnd={commitVote}
+                            className="relative z-10"
+                        />
+                    </div>
+                    <ThumbsUp 
+                        size={20} 
+                        className={`transition-colors ${localVote > 75 ? "text-green-500 fill-current" : "text-neutral-600"}`} 
+                    />
+                </div>
+            </div>
+        )}
       </header>
 
       <ConfirmationModal 
@@ -160,6 +292,24 @@ function PlayContent() {
         title="Leave Party?"
         description="Are you sure you want to leave the game?"
         confirmText="Leave"
+      />
+
+      <ConfirmationModal 
+        isOpen={!!deleteItemId}
+        onCancel={() => setDeleteItem(null)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Song?"
+        description="Are you sure you want to remove this song from your queue?"
+        confirmText="Delete"
+      />
+
+      <InputModal
+        isOpen={showNameModal}
+        onCancel={() => setShowNameModal(false)}
+        onConfirm={handleChangeName}
+        title="Change Nickname"
+        placeholder="New name..."
+        initialValue={player.nickname}
       />
 
       <div className="flex-1 flex flex-col">
@@ -213,7 +363,7 @@ function PlayContent() {
                                 </div>
                             </div>
                             <button 
-                                onClick={() => handleDelete(item.id)}
+                                onClick={() => handleDeleteClick(item.id)}
                                 className="p-2 text-neutral-600 hover:text-red-500 transition-colors"
                             >
                                 <Trash2 size={16} />

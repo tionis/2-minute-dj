@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { AppSchema } from "@/instant.schema";
 import { InstaQLEntity } from "@instantdb/react";
 import { SkipForward, Pause, Play, Users, Clock, Trash2, Crown, Plus } from "lucide-react";
+import { useState } from "react";
+import ConfirmationModal from "@/components/ui/ConfirmationModal";
 
 type Room = InstaQLEntity<AppSchema, "rooms">;
 type Player = InstaQLEntity<AppSchema, "players">;
@@ -15,7 +17,9 @@ interface VIPControlsProps {
 }
 
 export default function VIPControls({ room, queueItems }: VIPControlsProps) {
-  
+  const [kickPlayerId, setKickPlayerId] = useState<string | null>(null);
+  const [kickPlayerName, setKickPlayerName] = useState("");
+
   const handleSkip = () => {
     // Replicate skip logic client-side
     // 1. Mark current as PLAYED
@@ -50,18 +54,6 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
 
   const togglePause = () => {
       if (room.status === "PLAYING") {
-          // Pause: Save state? Actually just stop timer.
-          // For simple pause, we change status. Host timer will stop ticking.
-          // But when we resume, we need to adjust playback_started_at so we don't jump ahead.
-          // Complex. For MVP "Pause" just freezes the room state.
-          // Host GameView check: if (status !== "PLAYING") return;
-          // So timer stops. When we set back to PLAYING, timer resumes?
-          // No, elapsed = Date.now() - started_at. If we wait 10s, elapsed increases 10s.
-          // To support Resume, we need to shift started_at by the pause duration.
-          // Implemented simple Pause for now (stops skip, but timer might drift).
-          // Actually user asked for "pause".
-          // Let's store paused_at.
-          
           db.transact(db.tx.rooms[room.id].update({ 
               status: "PAUSED",
               paused_at: Date.now()
@@ -84,8 +76,14 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
   };
 
   const kickPlayer = (pId: string, name: string) => {
-      if (confirm(`Kick ${name}?`)) {
-          db.transact(db.tx.players[pId].delete());
+      setKickPlayerId(pId);
+      setKickPlayerName(name);
+  };
+
+  const confirmKick = () => {
+      if (kickPlayerId) {
+          db.transact(db.tx.players[kickPlayerId].delete());
+          setKickPlayerId(null);
       }
   };
 
@@ -177,6 +175,16 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
                 ))}
             </div>
         </div>
+
+        <ConfirmationModal 
+            isOpen={!!kickPlayerId}
+            onCancel={() => setKickPlayerId(null)}
+            onConfirm={confirmKick}
+            title={`Kick ${kickPlayerName}?`}
+            description="Are you sure you want to kick this player?"
+            confirmText="Kick"
+            cancelText="Cancel"
+        />
     </div>
   );
 }

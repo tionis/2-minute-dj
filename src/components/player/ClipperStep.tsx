@@ -1,12 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import dynamic from "next/dynamic";
 import { Slider } from "@/components/ui/slider";
-import { Loader2, Check, Play } from "lucide-react";
-
-// Dynamic import to avoid SSR issues
-const ReactPlayer = dynamic(() => import("react-player"), { ssr: false });
+import { Loader2, Music2, Check, Play, Pause } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface ClipperStepProps {
   videoId: string;
@@ -15,12 +12,11 @@ interface ClipperStepProps {
 }
 
 export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepProps) {
-  const [duration, setDuration] = useState<number>(0);
+  const [duration, setDuration] = useState<number>(600); // Default to 10 mins
   const [startTime, setStartTime] = useState<number>(0);
-  const [previewTime, setPreviewTime] = useState<number>(0); // Time sent to iframe
-  const [isReady, setIsReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
+  const [previewTime, setPreviewTime] = useState<number>(0); 
+  const [isReady, setIsReady] = useState(false); // Used for iframe load
+  
   // Constants
   const WINDOW_SIZE = 120; // 2 minutes
 
@@ -30,46 +26,20 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const handleDuration = (d: number) => {
-    console.log("Got duration:", d);
-    setDuration(d);
-    setIsReady(true);
-  };
-
-  const handleError = (e: any) => {
-    console.error("ReactPlayer Error:", e);
-    // If ReactPlayer fails, we might still be able to play via iframe,
-    // but we won't know duration. Default to 10 mins?
-    if (!duration) {
-        setDuration(600); 
-        setIsReady(true);
-    }
-  };
-
-  // Fallback: If duration load hangs, just show the UI with a default duration
-  useEffect(() => {
-    const timer = setTimeout(() => {
-        if (!isReady && !duration) {
-            console.warn("Duration timeout. Using fallback.");
-            setDuration(300); // 5 mins fallback
-            setIsReady(true);
-        }
-    }, 2000); // Quick fallback
-    return () => clearTimeout(timer);
-  }, [isReady, duration]);
-
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newStart = Number(e.target.value);
     setStartTime(newStart);
   };
 
-  // Only update iframe when user stops dragging to avoid reload spam
   const handleSliderCommit = () => {
     setPreviewTime(startTime);
+    setIsReady(false); // Show loader while iframe updates/reloads
   };
 
-  const maxStart = Math.max(0, duration - WINDOW_SIZE);
-  const Player = ReactPlayer as any;
+  // Max start time is duration - 120s? 
+  // With hardcoded duration, we should just let them slide up to the limit.
+  // If they pick a time past the real end, the video won't play.
+  const maxStart = duration; 
 
   return (
     <div className="w-full max-w-md space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -85,37 +55,23 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
           </div>
         )}
 
-        {/* Hidden Player for Metadata Only */}
-        <div className="hidden">
-            <Player
-                url={`https://www.youtube.com/watch?v=${videoId}`}
-                onDuration={handleDuration}
-                onError={handleError}
-                playing={false}
-                muted={true}
-                config={{ youtube: { playerVars: { origin: typeof window !== 'undefined' ? window.location.origin : undefined } } as any }}
-            />
-        </div>
-        
         {/* Visual Player (Native Iframe) */}
-        {isReady && (
-            <iframe
-                key={previewTime} // Reload on commit
-                width="100%"
-                height="100%"
-                src={`https://www.youtube.com/embed/${videoId}?start=${previewTime}&autoplay=1&controls=0&modestbranding=1&rel=0`}
-                title="Preview"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                className="border-none"
-            />
-        )}
+        <iframe
+            key={previewTime} // Reload on commit
+            width="100%"
+            height="100%"
+            src={`https://www.youtube.com/embed/${videoId}?start=${previewTime}&autoplay=1&controls=0&modestbranding=1&rel=0`}
+            title="Preview"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            className="border-none"
+            onLoad={() => setIsReady(true)}
+        />
       </div>
 
-      {isReady && (
-        <div className="space-y-6">
+      <div className="space-y-6">
           <div className="flex justify-between text-sm font-mono text-indigo-400">
             <span>Start: {formatTime(startTime)}</span>
-            <span>End: {formatTime(Math.min(duration, startTime + WINDOW_SIZE))}</span>
+            <span>+ 2 min</span>
           </div>
 
           <div className="relative pt-6 pb-2">
@@ -159,7 +115,6 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
             </button>
           </div>
         </div>
-      )}
     </div>
   );
 }
