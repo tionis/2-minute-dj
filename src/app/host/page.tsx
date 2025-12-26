@@ -17,10 +17,18 @@ export default function HostPage() {
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [origin, setOrigin] = useState("");
   const [showQuitModal, setShowQuitModal] = useState(false);
+  const [kickPlayerId, setKickPlayerId] = useState<string | null>(null);
+  const [kickPlayerName, setKickPlayerName] = useState("");
 
-  const handleKick = (playerId: string, name: string) => {
-      if (confirm(`Kick ${name}?`)) {
-          db.transact(db.tx.players[playerId].delete());
+  const handleKickClick = (playerId: string, name: string) => {
+      setKickPlayerId(playerId);
+      setKickPlayerName(name);
+  };
+
+  const handleKickConfirm = () => {
+      if (kickPlayerId) {
+          db.transact(db.tx.players[kickPlayerId].delete());
+          setKickPlayerId(null);
       }
   };
 
@@ -67,10 +75,9 @@ export default function HostPage() {
     roomId
       ? {
           rooms: {
-            $:
-              {
-                where: { id: roomId },
-              },
+            $: {
+              where: { id: roomId },
+            },
             players: {},
             queue_items: {
                 player: {},
@@ -182,8 +189,17 @@ export default function HostPage() {
         confirmText="Close Room"
       />
 
-      <div className="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-3 gap-12 items-center">
+      <ConfirmationModal 
+        isOpen={!!kickPlayerId}
+        onCancel={() => setKickPlayerId(null)}
+        onConfirm={handleKickConfirm}
+        title={`Kick ${kickPlayerName}?`}
+        description="Are you sure you want to kick this player?"
+        confirmText="Kick"
+        cancelText="Cancel"
+      />
 
+      <div className="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-3 gap-12 items-center">
         
         {/* Left: Join Info */}
         <div className="lg:col-span-2 space-y-12 flex flex-col items-center lg:items-start">
@@ -255,7 +271,7 @@ export default function HostPage() {
 
                             {/* Kick Button */}
                             <button 
-                                onClick={() => handleKick(player.id, player.nickname)}
+                                onClick={() => handleKickClick(player.id, player.nickname)}
                                 className="bg-red-500 text-white p-1 rounded-full hover:scale-110 transition-transform"
                                 title="Kick Player"
                             >

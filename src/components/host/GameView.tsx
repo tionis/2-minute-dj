@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { AppSchema } from "@/instant.schema";
 import { InstaQLEntity } from "@instantdb/react";
 import { Loader2, Music, User, SkipForward, Clock, Play, Settings, X, Crown } from "lucide-react";
+import ConfirmationModal from "@/components/ui/ConfirmationModal";
 
 const ReactPlayer = dynamic(() => import("react-player"), { ssr: false });
 
@@ -23,6 +24,8 @@ export default function GameView({ room }: GameViewProps) {
   const [isPlayerReady, setIsPlayerReady] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showPlayers, setShowPlayers] = useState(false);
+  const [kickPlayerId, setKickPlayerId] = useState<string | null>(null);
+  const [kickPlayerName, setKickPlayerName] = useState("");
   
   // Use refs to avoid stale closures in interval
   const roomRef = useRef(room);
@@ -32,9 +35,6 @@ export default function GameView({ room }: GameViewProps) {
       roomRef.current = room;
       isEndingRef.current = isEnding;
   }, [room, isEnding]);
-
-  const activeQueueItem = room.queue_items.find(q => q.id === room.active_player_id); 
-  const activePlayer = room.players.find(p => p.id === (activeQueueItem as any)?.player?.id);
 
   // Reset ready state when song changes
   useEffect(() => {
@@ -126,7 +126,19 @@ export default function GameView({ room }: GameViewProps) {
   };
 
   const endSession = () => {
-    db.transact(db.tx.rooms[room.id].update({ status: "FINISHED" }));
+    const txs = [];
+    // Mark current song as PLAYED if it exists
+    if (activeQueueItem) {
+        txs.push(db.tx.queue_items[activeQueueItem.id].update({ status: "PLAYED" }));
+    }
+    // Set room status to FINISHED and clear current playback state
+    txs.push(db.tx.rooms[room.id].update({ 
+        status: "FINISHED",
+        current_video_id: null,
+        active_player_id: null,
+        playback_started_at: null,
+    }));
+    db.transact(txs);
   };
 
   const updateTimer = (seconds: number) => {
@@ -140,8 +152,14 @@ export default function GameView({ room }: GameViewProps) {
   };
 
   const handleKick = (playerId: string, name: string) => {
-      if (confirm(`Kick ${name}?`)) {
-          db.transact(db.tx.players[playerId].delete());
+      setKickPlayerId(playerId);
+      setKickPlayerName(name);
+  };
+
+  const confirmKick = () => {
+      if (kickPlayerId) {
+          db.transact(db.tx.players[kickPlayerId].delete());
+          setKickPlayerId(null);
       }
   };
 
@@ -252,6 +270,16 @@ export default function GameView({ room }: GameViewProps) {
             </div>
         </div>
       )}
+
+      <ConfirmationModal 
+        isOpen={!!kickPlayerId}
+        onCancel={() => setKickPlayerId(null)}
+        onConfirm={confirmKick}
+        title={`Kick ${kickPlayerName}?`}
+        description="Are you sure you want to kick this player?"
+        confirmText="Kick"
+        cancelText="Cancel"
+      />
     </>
   );
 
