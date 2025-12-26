@@ -1,7 +1,5 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
 import { useEffect, useState } from "react";
 import { db } from "@/lib/db";
 import { generateRoomCode } from "@/lib/utils";

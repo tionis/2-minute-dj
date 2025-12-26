@@ -1,7 +1,5 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
 import { db } from "@/lib/db";
 import { useSearchParams } from "next/navigation";
 import { Loader2, Music4, Radio, Languages } from "lucide-react";

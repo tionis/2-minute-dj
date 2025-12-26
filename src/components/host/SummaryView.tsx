@@ -42,7 +42,7 @@ export default function SummaryView({ room }: SummaryViewProps) {
   };
 
   const handleCopyLink = () => {
-      const url = `${typeof window !== "undefined" ? window.location.origin : ""}/summary/${room.id}`;
+      const url = `${typeof window !== "undefined" ? window.location.origin : ""}/summary?roomId=${room.id}`;
       navigator.clipboard.writeText(url);
       setShowLinkAlert(true);
   };
