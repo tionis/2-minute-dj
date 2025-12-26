@@ -27,6 +27,7 @@ const _schema = i.schema({
       video_title: i.string().optional(), // Added title
       highlight_start: i.number(),
       status: i.string(), // "PENDING" | "PLAYED" | "SKIPPED"
+      votes: i.json().optional(), // { [playerId]: 1 | -1 }
       created_at: i.number(),
     }),
   },
