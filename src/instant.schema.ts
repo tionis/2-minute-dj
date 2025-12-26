@@ -4,39 +4,68 @@ import { i } from "@instantdb/react";
 
 const _schema = i.schema({
   entities: {
-    $files: i.entity({
-      path: i.string().unique().indexed(),
-      url: i.string(),
+    rooms: i.entity({
+      code: i.string().unique().indexed(),
+      status: i.string(), // "LOBBY" | "PLAYING" | "PAUSED" | "FINISHED"
+      current_video_id: i.string().optional(),
+      current_start_time: i.number().optional(),
+      playback_started_at: i.number().optional(),
+      active_player_id: i.string().optional(),
+      timer_duration: i.number().optional(), // Default 120
+      paused_at: i.number().optional(), // For pause functionality
+      created_at: i.number(),
     }),
-    $users: i.entity({
-      email: i.string().unique().indexed().optional(),
-      imageURL: i.string().optional(),
-      type: i.string().optional(),
+    players: i.entity({
+      nickname: i.string(),
+      avatar_seed: i.string(),
+      is_online: i.boolean().optional(),
+      is_vip: i.boolean().optional(), // VIP status
+      joined_at: i.number(),
     }),
-    todos: i.entity({
-      text: i.string(),
-      done: i.boolean(),
-      createdAt: i.number(),
+    queue_items: i.entity({
+      video_id: i.string(),
+      video_title: i.string().optional(), // Added title
+      highlight_start: i.number(),
+      status: i.string(), // "PENDING" | "PLAYED" | "SKIPPED"
+      created_at: i.number(),
     }),
   },
   links: {
-    $usersLinkedPrimaryUser: {
+    roomPlayers: {
       forward: {
-        on: "$users",
+        on: "players",
         has: "one",
-        label: "linkedPrimaryUser",
-        onDelete: "cascade",
+        label: "room",
       },
       reverse: {
-        on: "$users",
+        on: "rooms",
         has: "many",
-        label: "linkedGuestUsers",
+        label: "players",
       },
     },
-  },
-  rooms: {
-    todos: {
-      presence: i.entity({}),
+    roomQueue: {
+      forward: {
+        on: "queue_items",
+        has: "one",
+        label: "room",
+      },
+      reverse: {
+        on: "rooms",
+        has: "many",
+        label: "queue_items",
+      },
+    },
+    playerQueue: {
+      forward: {
+        on: "queue_items",
+        has: "one",
+        label: "player",
+      },
+      reverse: {
+        on: "players",
+        has: "many",
+        label: "queue_items",
+      },
     },
   },
 });
