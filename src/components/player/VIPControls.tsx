@@ -3,7 +3,7 @@
 import { db } from "@/lib/db";
 import { AppSchema } from "@/instant.schema";
 import { InstaQLEntity } from "@instantdb/react";
-import { SkipForward, Pause, Play, Users, Clock, Trash2, Crown } from "lucide-react";
+import { SkipForward, Pause, Play, Users, Clock, Trash2, Crown, Plus } from "lucide-react";
 
 type Room = InstaQLEntity<AppSchema, "rooms">;
 type Player = InstaQLEntity<AppSchema, "players">;
@@ -89,6 +89,12 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
       }
   };
 
+  const addTime = (seconds: number) => {
+      if (!room.playback_started_at) return;
+      const newStart = room.playback_started_at + (seconds * 1000);
+      db.transact(db.tx.rooms[room.id].update({ playback_started_at: newStart }));
+  };
+
   return (
     <div className="bg-neutral-900 border border-yellow-500/30 rounded-2xl p-4 space-y-6 mt-8">
         <div className="flex items-center space-x-2 text-yellow-500 font-bold uppercase tracking-widest text-xs border-b border-neutral-800 pb-2">
@@ -120,7 +126,7 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
         </div>
 
         {/* Timer Controls */}
-        <div className="space-y-2">
+        <div className="space-y-3">
             <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 flex items-center space-x-1">
                 <Clock size={10} />
                 <span>Round Timer</span>
@@ -140,6 +146,15 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
                     </button>
                 ))}
             </div>
+            
+            {/* Add Time Button */}
+            <button 
+                onClick={() => addTime(30)}
+                className="w-full py-2.5 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 font-bold text-xs flex items-center justify-center space-x-2 hover:bg-indigo-500/20 transition-all"
+            >
+                <Plus size={14} />
+                <span>Add 30s to Round</span>
+            </button>
         </div>
 
         {/* Player Management */}
