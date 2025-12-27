@@ -9,6 +9,7 @@ const _schema = i.schema({
       status: i.string(), // "LOBBY" | "PLAYING" | "PAUSED" | "FINISHED"
       current_video_id: i.string().optional(),
       current_start_time: i.number().optional(),
+      current_video_offset: i.number().optional(), // Offset in video when paused (in seconds)
       playback_started_at: i.number().optional(),
       active_player_id: i.string().optional(), // Currently whose turn it is (player id)
       active_queue_item_id: i.string().optional(), // Currently playing queue item id

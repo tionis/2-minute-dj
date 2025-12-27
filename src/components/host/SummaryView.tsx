@@ -2,9 +2,9 @@
 
 import { AppSchema } from "@/instant.schema";
 import { InstaQLEntity } from "@instantdb/react";
-import { Music, Trophy, ExternalLink, RotateCcw, ThumbsUp, Share, Download } from "lucide-react";
+import { Trophy, ExternalLink, RotateCcw, ThumbsUp, Share, Download, FileCode } from "lucide-react";
 import { useState } from "react";
-import AlertModal from "@/components/ui/AlertModal";
+import ShareLinkModal from "@/components/ui/ShareLinkModal";
 import { useI18n } from "@/components/LanguageProvider";
 
 type Room = InstaQLEntity<AppSchema, "rooms">;
@@ -17,7 +17,8 @@ interface SummaryViewProps {
 
 export default function SummaryView({ room }: SummaryViewProps) {
   const { t, language } = useI18n();
-  const [showLinkAlert, setShowLinkAlert] = useState(false);
+  const [showLinkModal, setShowLinkModal] = useState(false);
+  const [shareUrl, setShareUrl] = useState("");
 
   const playedSongs = room.queue_items
     .filter(q => q.status === "PLAYED" || q.status === "SKIPPED") // Include skipped songs
@@ -31,7 +32,7 @@ export default function SummaryView({ room }: SummaryViewProps) {
       return Math.round(sum / values.length);
   };
 
-  const handleDownload = () => {
+  const handleDownloadJSON = () => {
       const data = JSON.stringify(room, null, 2);
       const blob = new Blob([data], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -39,12 +40,88 @@ export default function SummaryView({ room }: SummaryViewProps) {
       link.href = url;
       link.download = `2mdj-session-${room.code}.json`;
       link.click();
+      URL.revokeObjectURL(url);
   };
 
-  const handleCopyLink = () => {
+  const handleDownloadHTML = () => {
+    const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>2-Minute DJ Session - ${room.code}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #fff; padding: 40px 20px; line-height: 1.6; }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 { font-size: 2.5rem; text-align: center; margin-bottom: 10px; }
+    .subtitle { text-align: center; color: #888; margin-bottom: 40px; font-size: 1.1rem; }
+    .song { display: flex; align-items: center; gap: 16px; padding: 16px; background: #1a1a1a; border-radius: 12px; margin-bottom: 12px; border: 1px solid #333; }
+    .song:hover { border-color: #6366f1; }
+    .thumbnail { width: 80px; height: 60px; border-radius: 8px; object-fit: cover; background: #333; flex-shrink: 0; }
+    .info { flex: 1; min-width: 0; }
+    .title { font-weight: 600; font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dj { color: #888; font-size: 0.875rem; }
+    .score { padding: 6px 12px; border-radius: 8px; font-weight: 600; font-size: 0.875rem; }
+    .score.good { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+    .score.bad { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+    .score.neutral { background: #333; color: #888; }
+    .skipped { font-size: 0.65rem; background: rgba(239, 68, 68, 0.2); color: #ef4444; padding: 2px 8px; border-radius: 999px; margin-left: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .link { color: #6366f1; text-decoration: none; padding: 8px; border-radius: 8px; background: #1a1a1a; }
+    .link:hover { background: rgba(99, 102, 241, 0.2); }
+    .index { width: 32px; height: 32px; border-radius: 50%; background: #262626; display: flex; align-items: center; justify-content: center; color: #888; font-size: 0.875rem; flex-shrink: 0; }
+    .footer { text-align: center; margin-top: 40px; color: #666; font-size: 0.875rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎧 Session Summary</h1>
+    <p class="subtitle">${playedSongs.length} tracks shared • Room: ${room.code}</p>
+    
+    ${playedSongs.map((song, index) => {
+      const score = calculateScore(song.votes);
+      const scoreClass = score !== null ? (score > 75 ? 'good' : score < 25 ? 'bad' : 'neutral') : '';
+      const player = (song as any).player;
+      return `
+    <div class="song">
+      <div class="index">${index + 1}</div>
+      <img class="thumbnail" src="https://img.youtube.com/vi/${song.video_id}/mqdefault.jpg" alt="" onerror="this.style.display='none'">
+      <div class="info">
+        <div class="title">${song.video_title || `Unknown Track (${song.video_id})`}${song.status === 'SKIPPED' ? '<span class="skipped">Skipped</span>' : ''}</div>
+        <div class="dj">DJ ${player?.nickname || 'Unknown'}</div>
+      </div>
+      ${score !== null ? `<div class="score ${scoreClass}">${score}%</div>` : ''}
+      <a class="link" href="https://youtube.com/watch?v=${song.video_id}" target="_blank" rel="noopener">▶</a>
+    </div>`;
+    }).join('')}
+    
+    <p class="footer">Generated by 2-Minute DJ • ${new Date().toLocaleDateString()}</p>
+  </div>
+</body>
+</html>`;
+    
+    const blob = new Blob([htmlContent], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `2mdj-session-${room.code}.html`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleShareLink = () => {
       const url = `${typeof window !== "undefined" ? window.location.origin : ""}/summary?roomId=${room.id}`;
-      navigator.clipboard.writeText(url);
-      setShowLinkAlert(true);
+      setShareUrl(url);
+      setShowLinkModal(true);
+  };
+
+  const handleNewSession = () => {
+    // Clear the stored room from localStorage and redirect to host page
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("2mdj_host_roomId");
+      localStorage.removeItem("2mdj_host_roomCode");
+      window.location.href = "/host";
+    }
   };
 
   return (
@@ -80,6 +157,13 @@ export default function SummaryView({ room }: SummaryViewProps) {
                                 <div className="w-10 h-10 rounded-full bg-neutral-900 flex items-center justify-center text-neutral-500 font-mono text-sm shrink-0">
                                     {index + 1}
                                 </div>
+                                {/* YouTube Thumbnail */}
+                                <img
+                                  src={`https://img.youtube.com/vi/${song.video_id}/mqdefault.jpg`}
+                                  alt=""
+                                  className="w-20 h-14 rounded-lg object-cover bg-neutral-800 shrink-0"
+                                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                />
                                 <div className="truncate">
                                     <h3 className="font-bold text-lg flex items-center space-x-2">
                                         <span className="truncate">{song.video_title || `${t("unknownTrack")} (${song.video_id})`}</span>
@@ -122,9 +206,9 @@ export default function SummaryView({ room }: SummaryViewProps) {
       </div>
 
       {/* Action */}
-      <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
+      <div className="flex flex-col sm:flex-row justify-center items-center gap-4 flex-wrap">
         <button 
-            onClick={() => typeof window !== "undefined" && window.location.reload()}
+            onClick={handleNewSession}
             className="flex items-center space-x-2 px-8 py-4 rounded-full bg-white text-black font-bold text-lg hover:bg-neutral-200 transition-all"
         >
             <RotateCcw size={20} />
@@ -132,7 +216,7 @@ export default function SummaryView({ room }: SummaryViewProps) {
         </button>
 
         <button 
-            onClick={handleCopyLink}
+            onClick={handleShareLink}
             className="flex items-center space-x-2 px-8 py-4 rounded-full border border-neutral-700 text-neutral-300 font-bold text-lg hover:bg-neutral-800 transition-all"
         >
             <Share size={20} />
@@ -140,19 +224,27 @@ export default function SummaryView({ room }: SummaryViewProps) {
         </button>
 
         <button 
-            onClick={handleDownload}
+            onClick={handleDownloadJSON}
             className="flex items-center space-x-2 px-8 py-4 rounded-full border border-neutral-700 text-neutral-300 font-bold text-lg hover:bg-neutral-800 transition-all"
         >
             <Download size={20} />
             <span>{t("json")}</span>
         </button>
+
+        <button 
+            onClick={handleDownloadHTML}
+            className="flex items-center space-x-2 px-8 py-4 rounded-full border border-neutral-700 text-neutral-300 font-bold text-lg hover:bg-neutral-800 transition-all"
+        >
+            <FileCode size={20} />
+            <span>HTML</span>
+        </button>
       </div>
 
-      <AlertModal
-        isOpen={showLinkAlert}
-        onClose={() => setShowLinkAlert(false)}
-        title={language === "de" ? "Link kopiert" : "Link Copied"}
-        description={language === "de" ? "Der Link zur Zusammenfassung wurde in die Zwischenablage kopiert." : "The summary link has been copied to your clipboard."}
+      <ShareLinkModal
+        isOpen={showLinkModal}
+        onClose={() => setShowLinkModal(false)}
+        title={language === "de" ? "Link teilen" : "Share Link"}
+        link={shareUrl}
         buttonText={t("confirm")}
       />
     </div>

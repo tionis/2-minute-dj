@@ -5,8 +5,8 @@ import dynamic from "next/dynamic";
 import { Loader2, Check } from "lucide-react";
 import { useI18n } from "@/components/LanguageProvider";
 
-// Import ReactPlayer dynamically to avoid SSR issues
-const ReactPlayer = dynamic(() => import("react-player"), { ssr: false }) as any;
+// Import ReactPlayer dynamically to avoid SSR issues - use any to bypass broken types
+const ReactPlayer = dynamic(() => import("react-player").then(mod => mod.default as any), { ssr: false }) as any;
 
 interface ClipperStepProps {
   videoId: string;
@@ -39,11 +39,6 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
     }
   };
 
-  // When player loads duration
-  const handleDuration = (d: number) => {
-      setDuration(d);
-  };
-
   return (
     <div className="w-full max-w-md space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="text-center space-y-2">
@@ -66,12 +61,7 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
             playing={true}
             controls={false}
             onReady={() => setIsReady(true)}
-            onDuration={handleDuration}
-            config={{
-                youtube: {
-                    playerVars: { modestbranding: 1, rel: 0 }
-                }
-            } as any}
+            onDuration={(d: number) => setDuration(d)}
         />
         
         {/* Helper overlay to show it's a preview */}

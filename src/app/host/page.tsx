@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { db } from "@/lib/db";
 import { generateRoomCode } from "@/lib/utils";
 import { id } from "@instantdb/react";
-import { Copy, Users, Play, Loader2, X, Crown, LogOut, Languages } from "lucide-react";
+import { Copy, Users, Play, Loader2, X, Crown, LogOut, Languages, Clock, SkipForward } from "lucide-react";
 import GameView from "@/components/host/GameView";
 import SummaryView from "@/components/host/SummaryView";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
@@ -242,6 +242,65 @@ export default function HostPage() {
                 <h1 className="text-9xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-br from-indigo-400 to-purple-400 select-none leading-none">
                 {roomCode}
                 </h1>
+            </div>
+
+            {/* Game Settings */}
+            <div className="w-full max-w-lg bg-neutral-900/50 rounded-2xl border border-neutral-800 p-6 space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-neutral-500 border-b border-neutral-800 pb-2">
+                    {language === "de" ? "Einstellungen" : "Settings"}
+                </h3>
+                
+                {/* Timer Duration */}
+                <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 flex items-center space-x-1">
+                        <Clock size={10} />
+                        <span>{t("timerDuration")}</span>
+                    </label>
+                    <div className="grid grid-cols-4 gap-2">
+                        {[60, 90, 120, 180].map((sec) => (
+                            <button
+                                key={sec}
+                                onClick={() => db.transact(db.tx.rooms[roomId!].update({ timer_duration: sec }))}
+                                className={`py-2 rounded-lg font-bold text-xs border transition-all ${
+                                    (room?.timer_duration || 120) === sec 
+                                        ? "border-indigo-500 bg-indigo-500/20 text-white" 
+                                        : "border-neutral-800 bg-neutral-800/50 text-neutral-400 hover:border-neutral-700"
+                                }`}
+                            >
+                                {sec}s
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Auto-Skip Toggle */}
+                <div className="flex items-center justify-between pt-2 border-t border-neutral-800">
+                    <div className="flex items-center space-x-2">
+                        <SkipForward size={14} className="text-neutral-500" />
+                        <div className="flex flex-col">
+                            <span className="text-xs font-bold text-neutral-300">
+                                {language === "de" ? "Auto-Skip" : "Auto-Skip"}
+                            </span>
+                            <span className="text-[10px] text-neutral-500">
+                                {language === "de" ? "Automatisch weiter bei 00:00" : "Auto advance at 00:00"}
+                            </span>
+                        </div>
+                    </div>
+                    <button 
+                        onClick={() => db.transact(db.tx.rooms[roomId!].update({ auto_skip: (room as any)?.auto_skip === false }))}
+                        className={`relative w-12 h-6 rounded-full transition-colors ${
+                            (room as any)?.auto_skip !== false 
+                                ? "bg-indigo-500" 
+                                : "bg-neutral-700"
+                        }`}
+                    >
+                        <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                            (room as any)?.auto_skip !== false 
+                                ? "translate-x-6" 
+                                : "translate-x-0.5"
+                        }`} />
+                    </button>
+                </div>
             </div>
 
             {/* Start Button */}

@@ -29,6 +29,7 @@ export default function GameView({ room }: GameViewProps) {
   const [showPlayers, setShowPlayers] = useState(false);
   const [kickPlayerId, setKickPlayerId] = useState<string | null>(null);
   const [kickPlayerName, setKickPlayerName] = useState("");
+  const [iframeKey, setIframeKey] = useState(0); // Key to force iframe reload on resume
   
   const roomRef = useRef(room);
   const isEndingRef = useRef(isEnding);
@@ -82,9 +83,16 @@ export default function GameView({ room }: GameViewProps) {
 
   const togglePause = () => {
     if (room.status === "PLAYING") {
+      // Calculate how much video time has elapsed
+      const elapsedSeconds = room.playback_started_at 
+        ? Math.floor((Date.now() - room.playback_started_at) / 1000)
+        : 0;
+      const videoOffset = (room.current_start_time || 0) + elapsedSeconds;
+      
       db.transact(db.tx.rooms[room.id].update({ 
         status: "PAUSED",
-        paused_at: Date.now()
+        paused_at: Date.now(),
+        current_video_offset: videoOffset
       }));
     } else if (room.status === "PAUSED") {
       const pauseDuration = room.paused_at ? Date.now() - room.paused_at : 0;
@@ -95,6 +103,9 @@ export default function GameView({ room }: GameViewProps) {
         playback_started_at: newStart,
         paused_at: null
       }));
+      
+      // Force iframe reload with new offset
+      setIframeKey(prev => prev + 1);
     }
   };
 
@@ -172,6 +183,7 @@ export default function GameView({ room }: GameViewProps) {
       txs.push(db.tx.rooms[currentRoom.id].update({
         current_video_id: nextItem.video_id,
         current_start_time: nextItem.highlight_start,
+        current_video_offset: nextItem.highlight_start, // Reset offset to start time
         playback_started_at: Date.now(),
         active_player_id: nextPlayerId,
         active_queue_item_id: nextItem.id,
@@ -189,6 +201,7 @@ export default function GameView({ room }: GameViewProps) {
           active_player_id: nextPlayerId,
           active_queue_item_id: null,
           playback_started_at: null,
+          current_video_offset: null,
           player_order: playerOrder,
           current_turn_index: nextTurnIndex % playerOrder.length,
         }));
@@ -199,6 +212,7 @@ export default function GameView({ room }: GameViewProps) {
           active_player_id: nextPlayerId,
           active_queue_item_id: null,
           playback_started_at: null,
+          current_video_offset: null,
           player_order: playerOrder,
           current_turn_index: nextTurnIndex % playerOrder.length,
         }));
@@ -524,7 +538,14 @@ export default function GameView({ room }: GameViewProps) {
           </div>
         )}
         
-        <iframe key={room.current_video_id} className={`absolute inset-0 w-full h-full border-none transition-opacity ${room.status === "PAUSED" ? "opacity-50" : ""}`} src={`https://www.youtube.com/embed/${room.current_video_id}?autoplay=${room.status === "PLAYING" ? 1 : 0}&start=${room.current_start_time}&controls=0&modestbranding=1&rel=0`} title="YouTube video player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" onLoad={() => setIsPlayerReady(true)} />
+        <iframe 
+          key={`${room.current_video_id}-${iframeKey}`} 
+          className={`absolute inset-0 w-full h-full border-none transition-opacity ${room.status === "PAUSED" ? "opacity-50" : ""}`} 
+          src={`https://www.youtube.com/embed/${room.current_video_id}?autoplay=${room.status === "PLAYING" ? 1 : 0}&start=${room.current_video_offset || room.current_start_time || 0}&controls=0&modestbranding=1&rel=0`} 
+          title="YouTube video player" 
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+          onLoad={() => setIsPlayerReady(true)} 
+        />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
         
         {/* Hype Meter Overlay */}

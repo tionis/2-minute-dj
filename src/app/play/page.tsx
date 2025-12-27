@@ -2,7 +2,7 @@
 
 import { db } from "@/lib/db";
 import { useSearchParams } from "next/navigation";
-import { Loader2, Music4, Radio, Languages, Clock, Crown, Play } from "lucide-react";
+import { Loader2, Music4, Radio, Languages, Clock, Crown, Play, SkipForward } from "lucide-react";
 import { Suspense, useState, useEffect } from "react";
 import { id } from "@instantdb/react";
 import SearchStep from "@/components/player/SearchStep";
@@ -248,6 +248,35 @@ function PlayContent() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Auto-Skip Toggle */}
+              <div className="flex items-center justify-between pt-3 border-t border-neutral-800">
+                <div className="flex items-center space-x-2">
+                  <SkipForward size={14} className="text-neutral-500" />
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-neutral-300">
+                      {language === "de" ? "Auto-Skip" : "Auto-Skip"}
+                    </span>
+                    <span className="text-[10px] text-neutral-500">
+                      {language === "de" ? "Automatisch weiter bei 00:00" : "Auto advance at 00:00"}
+                    </span>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => db.transact(db.tx.rooms[roomId].update({ auto_skip: (room as any).auto_skip === false }))}
+                  className={`relative w-12 h-6 rounded-full transition-colors ${
+                    (room as any).auto_skip !== false 
+                      ? "bg-indigo-500" 
+                      : "bg-neutral-700"
+                  }`}
+                >
+                  <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                    (room as any).auto_skip !== false 
+                      ? "translate-x-6" 
+                      : "translate-x-0.5"
+                  }`} />
+                </button>
               </div>
 
               {/* Start Button */}
