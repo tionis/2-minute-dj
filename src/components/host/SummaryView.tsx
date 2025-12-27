@@ -1,28 +1,27 @@
 "use client";
 
-import { AppSchema } from "@/instant.schema";
-import { InstaQLEntity } from "@instantdb/react";
+import { useGameStore } from "@/lib/game-context";
 import { Trophy, ExternalLink, RotateCcw, ThumbsUp, Share, Download, FileCode } from "lucide-react";
 import { useState } from "react";
 import ShareLinkModal from "@/components/ui/ShareLinkModal";
 import { useI18n } from "@/components/LanguageProvider";
 
-type Room = InstaQLEntity<AppSchema, "rooms">;
-type Player = InstaQLEntity<AppSchema, "players">;
-type QueueItem = InstaQLEntity<AppSchema, "queue_items">;
-
-interface SummaryViewProps {
-  room: Room & { players: Player[]; queue_items: QueueItem[] };
-}
-
-export default function SummaryView({ room }: SummaryViewProps) {
+export default function SummaryView() {
   const { t, language } = useI18n();
+  const { state, roomId } = useGameStore();
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [shareUrl, setShareUrl] = useState("");
 
-  const playedSongs = room.queue_items
-    .filter(q => q.status === "PLAYED" || q.status === "SKIPPED") // Include skipped songs
-    .sort((a, b) => a.created_at - b.created_at);
+  const room = state.room;
+  
+  // Resolve queue items with players
+  const playedSongs = Object.values(state.queue_items)
+    .filter(q => q.status === "PLAYED" || q.status === "SKIPPED")
+    .sort((a, b) => a.created_at - b.created_at)
+    .map(q => ({
+        ...q,
+        player: state.players[q.player_id]
+    }));
 
   const calculateScore = (votes: any) => {
       if (!votes) return null;
@@ -33,7 +32,12 @@ export default function SummaryView({ room }: SummaryViewProps) {
   };
 
   const handleDownloadJSON = () => {
-      const data = JSON.stringify(room, null, 2);
+      const exportData = {
+          room: room,
+          players: state.players,
+          queue_items: state.queue_items
+      };
+      const data = JSON.stringify(exportData, null, 2);
       const blob = new Blob([data], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -81,7 +85,7 @@ export default function SummaryView({ room }: SummaryViewProps) {
     ${playedSongs.map((song, index) => {
       const score = calculateScore(song.votes);
       const scoreClass = score !== null ? (score > 75 ? 'good' : score < 25 ? 'bad' : 'neutral') : '';
-      const player = (song as any).player;
+      const player = song.player;
       return `
     <div class="song">
       <div class="index">${index + 1}</div>
@@ -110,7 +114,8 @@ export default function SummaryView({ room }: SummaryViewProps) {
   };
 
   const handleShareLink = () => {
-      const url = `${typeof window !== "undefined" ? window.location.origin : ""}/summary?roomId=${room.id}`;
+      // Use roomId (which is code in P2P) for the link
+      const url = `${typeof window !== "undefined" ? window.location.origin : ""}/summary?roomId=${room.code}`;
       setShareUrl(url);
       setShowLinkModal(true);
   };
@@ -120,6 +125,7 @@ export default function SummaryView({ room }: SummaryViewProps) {
     if (typeof window !== "undefined") {
       localStorage.removeItem("2mdj_host_roomId");
       localStorage.removeItem("2mdj_host_roomCode");
+      localStorage.removeItem("2mdj_doc_backup");
       window.location.href = "/host";
     }
   };
@@ -172,7 +178,7 @@ export default function SummaryView({ room }: SummaryViewProps) {
                                         )}
                                     </h3>
                                     <p className="text-neutral-500 text-sm font-medium">
-                                        DJ { (song as any).player?.nickname || t("unknownDj") }
+                                        DJ { song.player?.nickname || t("unknownDj") }
                                     </p>
                                 </div>
                             </div>

@@ -1,30 +1,23 @@
 "use client";
 
-import { db } from "@/lib/db";
+import { useGameStore } from "@/lib/game-context";
 import { Loader2 } from "lucide-react";
 import SummaryView from "@/components/host/SummaryView";
 import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 
 function SummaryContent() {
   const searchParams = useSearchParams();
-  const roomId = searchParams.get("roomId");
+  const urlRoomId = searchParams.get("roomId");
+  const { state, setRoomId, roomId } = useGameStore();
 
-  const { data, isLoading, error } = db.useQuery(
-    roomId
-      ? {
-          rooms: {
-            $: { where: { id: roomId } },
-            players: {},
-            queue_items: {
-                player: {},
-            },
-          },
-        }
-      : null
-  );
+  useEffect(() => {
+    if (urlRoomId && urlRoomId !== roomId) {
+      setRoomId(urlRoomId);
+    }
+  }, [urlRoomId, roomId, setRoomId]);
 
-  if (!roomId) {
+  if (!urlRoomId) {
     return (
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-red-400 p-8">
         No Room ID provided.
@@ -32,27 +25,23 @@ function SummaryContent() {
     );
   }
 
-  if (isLoading) {
+  // We rely on state sync. If state.room.code is present, we have data.
+  // Note: This only works if the Host is online!
+  if (!state.room.code) {
     return (
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
+      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white flex-col space-y-4">
         <Loader2 className="animate-spin" size={32} />
+        <p className="text-neutral-500 text-sm">Connecting to party...</p>
+        <p className="text-neutral-700 text-xs max-w-xs text-center">
+            Note: The host must be online for the summary to load in P2P mode.
+        </p>
       </div>
     );
   }
-
-  if (error || !data?.rooms.length) {
-    return (
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-red-400 p-8">
-        Summary not found or error loading data.
-      </div>
-    );
-  }
-
-  const room = data.rooms[0];
 
   return (
     <div className="min-h-screen bg-neutral-950 text-white p-12 overflow-y-auto">
-        <SummaryView room={room as any} />
+        <SummaryView />
     </div>
   );
 }
