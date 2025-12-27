@@ -1,12 +1,16 @@
 "use client";
 
-import { useState, useRef } from "react";
-import dynamic from "next/dynamic";
+import { useState, useRef, useEffect } from "react";
 import { Loader2, Check } from "lucide-react";
 import { useI18n } from "@/components/LanguageProvider";
 
-// Import ReactPlayer dynamically to avoid SSR issues - use any to bypass broken types
-const ReactPlayer = dynamic(() => import("react-player").then(mod => mod.default as any), { ssr: false }) as any;
+// Declare YouTube IFrame API types
+declare global {
+  interface Window {
+    YT: any;
+    onYouTubeIframeAPIReady: () => void;
+  }
+}
 
 interface ClipperStepProps {
   videoId: string;
@@ -20,9 +24,65 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
   const [startTime, setStartTime] = useState<number>(0);
   const [isReady, setIsReady] = useState(false);
   const playerRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Constants
   const WINDOW_SIZE = 120; // 2 minutes
+
+  // Load YouTube IFrame API and create player
+  useEffect(() => {
+    // Load the IFrame Player API code asynchronously if not already loaded
+    if (!window.YT) {
+      const tag = document.createElement('script');
+      tag.src = "https://www.youtube.com/iframe_api";
+      const firstScriptTag = document.getElementsByTagName('script')[0];
+      firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+    }
+
+    const initPlayer = () => {
+      if (!containerRef.current || playerRef.current) return;
+      
+      playerRef.current = new window.YT.Player(containerRef.current, {
+        videoId: videoId,
+        playerVars: {
+          autoplay: 1,
+          controls: 0,
+          modestbranding: 1,
+          rel: 0,
+          showinfo: 0,
+          fs: 0,
+          playsinline: 1,
+        },
+        events: {
+          onReady: (event: any) => {
+            setIsReady(true);
+            const dur = event.target.getDuration();
+            if (dur > 0) setDuration(dur);
+          },
+          onStateChange: (event: any) => {
+            // Get duration when video starts playing
+            if (event.data === window.YT.PlayerState.PLAYING) {
+              const dur = event.target.getDuration();
+              if (dur > 0 && duration === 0) setDuration(dur);
+            }
+          }
+        }
+      });
+    };
+
+    if (window.YT && window.YT.Player) {
+      initPlayer();
+    } else {
+      window.onYouTubeIframeAPIReady = initPlayer;
+    }
+
+    return () => {
+      if (playerRef.current?.destroy) {
+        playerRef.current.destroy();
+        playerRef.current = null;
+      }
+    };
+  }, [videoId]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -34,9 +94,17 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
     const newStart = Number(e.target.value);
     setStartTime(newStart);
     // Real-time seeking
-    if (playerRef.current) {
-        playerRef.current.seekTo(newStart, "seconds");
+    if (playerRef.current?.seekTo) {
+      playerRef.current.seekTo(newStart, true);
     }
+  };
+
+  const handleQueue = () => {
+    // Stop the player before unmounting to prevent AbortError
+    if (playerRef.current?.stopVideo) {
+      playerRef.current.stopVideo();
+    }
+    onQueue(startTime);
   };
 
   return (
@@ -53,16 +121,8 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
           </div>
         )}
 
-        <ReactPlayer
-            ref={playerRef}
-            url={`https://www.youtube.com/watch?v=${videoId}`}
-            width="100%"
-            height="100%"
-            playing={true}
-            controls={false}
-            onReady={() => setIsReady(true)}
-            onDuration={(d: number) => setDuration(d)}
-        />
+        {/* YouTube Player Container */}
+        <div ref={containerRef} className="w-full h-full" />
         
         {/* Helper overlay to show it's a preview */}
         <div className="absolute top-2 right-2 bg-black/50 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-widest text-white/50 pointer-events-none">
@@ -112,7 +172,7 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
                 {t("back")}
             </button>
             <button
-                onClick={() => onQueue(startTime)}
+                onClick={handleQueue}
                 className="flex-[2] bg-indigo-600 text-white font-bold py-4 rounded-xl hover:bg-indigo-500 transition-colors flex items-center justify-center space-x-2"
             >
                 <span>{t("addToQueue")}</span>

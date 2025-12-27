@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import dynamic from "next/dynamic";
 import { db } from "@/lib/db";
 import { AppSchema } from "@/instant.schema";
 import { InstaQLEntity } from "@instantdb/react";
@@ -9,8 +8,6 @@ import { Loader2, Music, User, SkipForward, Clock, Play, Settings, X, Crown, Pau
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useI18n } from "@/components/LanguageProvider";
 import HypeMeter from "./HypeMeter";
-
-const ReactPlayer = dynamic(() => import("react-player"), { ssr: false });
 
 type Room = InstaQLEntity<AppSchema, "rooms">;
 type Player = InstaQLEntity<AppSchema, "players">;
