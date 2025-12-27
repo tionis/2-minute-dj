@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { db } from "@/lib/db";
 import { AppSchema } from "@/instant.schema";
 import { InstaQLEntity } from "@instantdb/react";
-import { Loader2, Music, User, SkipForward, Clock, Play, Settings, X, Crown } from "lucide-react";
+import { Loader2, Music, User, SkipForward, Clock, Play, Settings, X, Crown, Pause } from "lucide-react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useI18n } from "@/components/LanguageProvider";
 import HypeMeter from "./HypeMeter";
@@ -44,17 +44,27 @@ export default function GameView({ room }: GameViewProps) {
     return () => clearTimeout(timer);
   }, [room.current_video_id]);
 
+  // Reset isEnding when video changes
+  useEffect(() => {
+    setIsEnding(false);
+  }, [room.active_queue_item_id]);
+
   useEffect(() => {
     const interval = setInterval(() => {
       const currentRoom = roomRef.current;
-      if (currentRoom.status !== "PLAYING" || !currentRoom.playback_started_at) return;
+      // Don't update timer when paused
+      if (currentRoom.status === "PAUSED" || currentRoom.status !== "PLAYING" || !currentRoom.playback_started_at) return;
+      // Don't update timer when no video is playing
+      if (!currentRoom.current_video_id) return;
 
       const duration = currentRoom.timer_duration || 120;
       const elapsed = Math.floor((Date.now() - currentRoom.playback_started_at!) / 1000);
       const remaining = Math.max(0, duration - elapsed);
       setTimeLeft(remaining);
 
-      if (remaining <= 0 && !isEndingRef.current) {
+      // Auto-skip when timer reaches 0 (if auto_skip is enabled, default true)
+      const autoSkipEnabled = currentRoom.auto_skip !== false;
+      if (remaining <= 0 && !isEndingRef.current && autoSkipEnabled) {
         setIsEnding(true); 
         handleNextSong(); 
       }
@@ -70,31 +80,131 @@ export default function GameView({ room }: GameViewProps) {
     }
   }, [room.status, room.current_video_id, room.queue_items]);
 
+  const togglePause = () => {
+    if (room.status === "PLAYING") {
+      db.transact(db.tx.rooms[room.id].update({ 
+        status: "PAUSED",
+        paused_at: Date.now()
+      }));
+    } else if (room.status === "PAUSED") {
+      const pauseDuration = room.paused_at ? Date.now() - room.paused_at : 0;
+      const newStart = (room.playback_started_at || Date.now()) + pauseDuration;
+      
+      db.transact(db.tx.rooms[room.id].update({ 
+        status: "PLAYING",
+        playback_started_at: newStart,
+        paused_at: null
+      }));
+    }
+  };
+
+  // Get or initialize player order
+  const getPlayerOrder = (): string[] => {
+    if (room.player_order && Array.isArray(room.player_order)) {
+      // Filter out players who have left
+      const validPlayers = (room.player_order as string[]).filter(
+        pid => room.players.some(p => p.id === pid)
+      );
+      // Add any new players who joined
+      const newPlayers = room.players
+        .filter(p => !validPlayers.includes(p.id))
+        .sort((a, b) => a.joined_at - b.joined_at)
+        .map(p => p.id);
+      return [...validPlayers, ...newPlayers];
+    }
+    // Initialize from players sorted by join time
+    return room.players
+      .sort((a, b) => a.joined_at - b.joined_at)
+      .map(p => p.id);
+  };
+
+  // Get the current turn player
+  const getCurrentTurnPlayer = () => {
+    const playerOrder = getPlayerOrder();
+    if (playerOrder.length === 0) return null;
+    const turnIndex = room.current_turn_index ?? 0;
+    const playerId = playerOrder[turnIndex % playerOrder.length];
+    return room.players.find(p => p.id === playerId);
+  };
+
   const handleNextSong = async () => {
     const currentRoom = roomRef.current;
-    const pendingItems = currentRoom.queue_items.filter(q => q.status === "PENDING");
-    const currentActiveItem = currentRoom.queue_items.find(q => q.id === currentRoom.active_player_id);
+    const currentActiveItem = currentRoom.queue_items.find(
+      q => q.id === currentRoom.active_queue_item_id
+    );
 
     const txs = [];
+    
+    // Mark current item as played
     if (currentActiveItem) {
-        txs.push(db.tx.queue_items[currentActiveItem.id].update({ status: "PLAYED" }));
+      txs.push(db.tx.queue_items[currentActiveItem.id].update({ status: "PLAYED" }));
     }
 
-    if (pendingItems.length === 0) {
-        txs.push(db.tx.rooms[currentRoom.id].update({
-            current_video_id: null,
-            active_player_id: null,
-            playback_started_at: null,
-        }));
-    } else {
-        const nextItem = pendingItems.sort((a, b) => a.created_at - b.created_at)[0];
-        txs.push(db.tx.rooms[currentRoom.id].update({
-            current_video_id: nextItem.video_id,
-            current_start_time: nextItem.highlight_start,
-            playback_started_at: Date.now(),
-            active_player_id: nextItem.id, 
-        }));
+    // Get/update player order
+    const playerOrder = getPlayerOrder();
+    if (playerOrder.length === 0) {
+      txs.push(db.tx.rooms[currentRoom.id].update({
+        current_video_id: null,
+        active_player_id: null,
+        active_queue_item_id: null,
+        playback_started_at: null,
+      }));
+      await db.transact(txs);
+      setIsEnding(false);
+      return;
     }
+
+    // Calculate next turn
+    let nextTurnIndex = (currentRoom.current_turn_index ?? -1) + 1;
+    const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
+    
+    // Find the next player's pending queue item
+    const nextPlayerQueue = currentRoom.queue_items
+      .filter(q => 
+        q.status === "PENDING" && 
+        (q as any).player?.id === nextPlayerId
+      )
+      .sort((a, b) => a.created_at - b.created_at);
+
+    if (nextPlayerQueue.length > 0) {
+      // Play next player's song
+      const nextItem = nextPlayerQueue[0];
+      txs.push(db.tx.rooms[currentRoom.id].update({
+        current_video_id: nextItem.video_id,
+        current_start_time: nextItem.highlight_start,
+        playback_started_at: Date.now(),
+        active_player_id: nextPlayerId,
+        active_queue_item_id: nextItem.id,
+        player_order: playerOrder,
+        current_turn_index: nextTurnIndex % playerOrder.length,
+      }));
+    } else {
+      // No song in this player's queue - check if anyone else has songs
+      const anyPending = currentRoom.queue_items.some(q => q.status === "PENDING");
+      
+      if (anyPending) {
+        // Skip this player's turn and try next player (recursive call after update)
+        txs.push(db.tx.rooms[currentRoom.id].update({
+          current_video_id: null,
+          active_player_id: nextPlayerId,
+          active_queue_item_id: null,
+          playback_started_at: null,
+          player_order: playerOrder,
+          current_turn_index: nextTurnIndex % playerOrder.length,
+        }));
+      } else {
+        // No pending songs at all
+        txs.push(db.tx.rooms[currentRoom.id].update({
+          current_video_id: null,
+          active_player_id: nextPlayerId,
+          active_queue_item_id: null,
+          playback_started_at: null,
+          player_order: playerOrder,
+          current_turn_index: nextTurnIndex % playerOrder.length,
+        }));
+      }
+    }
+    
     await db.transact(txs);
     setIsEnding(false);
   };
@@ -177,6 +287,34 @@ export default function GameView({ room }: GameViewProps) {
                         <button onClick={() => addTime(60)} className="py-3 rounded-xl font-bold border-2 border-neutral-800 bg-neutral-800/50 text-white hover:border-indigo-500 hover:bg-indigo-500/20 transition-all">+60s</button>
                     </div>
                 </div>
+                <div className="space-y-4 pt-4 border-t border-neutral-800">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <label className="text-xs font-bold uppercase tracking-widest text-neutral-500">
+                                {language === "de" ? "Auto-Skip" : "Auto-Skip"}
+                            </label>
+                            <p className="text-xs text-neutral-600 mt-1">
+                                {language === "de" 
+                                    ? "Automatisch zum nächsten Song wechseln wenn der Timer abläuft" 
+                                    : "Automatically skip to next song when timer ends"}
+                            </p>
+                        </div>
+                        <button 
+                            onClick={() => db.transact(db.tx.rooms[room.id].update({ auto_skip: room.auto_skip === false }))}
+                            className={`relative w-14 h-8 rounded-full transition-colors ${
+                                room.auto_skip !== false 
+                                    ? "bg-indigo-500" 
+                                    : "bg-neutral-700"
+                            }`}
+                        >
+                            <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-transform ${
+                                room.auto_skip !== false 
+                                    ? "translate-x-7" 
+                                    : "translate-x-1"
+                            }`} />
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
       )}
@@ -237,26 +375,77 @@ export default function GameView({ room }: GameViewProps) {
     </>
   );
 
-  const activeQueueItem = room.queue_items.find(q => q.id === room.active_player_id); 
-  const activePlayer = room.players.find(p => p.id === (activeQueueItem as any)?.player?.id);
+  const activeQueueItem = room.queue_items.find(q => q.id === room.active_queue_item_id); 
+  const activePlayer = room.players.find(p => p.id === room.active_player_id);
+  const currentTurnPlayer = getCurrentTurnPlayer();
 
   if (!room.current_video_id) {
+    // Show whose turn it is when waiting
+    const turnPlayer = currentTurnPlayer;
+    const turnPlayerQueue = turnPlayer 
+      ? room.queue_items.filter(q => q.status === "PENDING" && (q as any).player?.id === turnPlayer.id)
+      : [];
+    
     return (
       <div className="w-full h-full flex flex-col animate-in fade-in duration-1000 relative overflow-hidden">
-        <div className="flex-1 flex flex-col items-center justify-center space-y-6 animate-pulse text-center">
+        <div className="flex-1 flex flex-col items-center justify-center space-y-6 text-center">
             <div className="p-8 rounded-full bg-indigo-500/10 text-indigo-500">
                 <Music size={64} />
             </div>
             <div className="space-y-2">
-                <h2 className="text-3xl font-bold italic text-neutral-400">{language === "de" ? "Warte auf Tracks..." : "Waiting for tracks..."}</h2>
-                <p className="text-neutral-600">{language === "de" ? "Die Warteschlange ist leer. Füge Songs auf deinem Handy hinzu!" : "The queue is empty. Add some fire on your phones!"}</p>
+                {turnPlayer ? (
+                  <>
+                    <h2 className="text-3xl font-bold text-white">
+                      {language === "de" 
+                        ? `${turnPlayer.nickname} ist dran!` 
+                        : `${turnPlayer.nickname}'s Turn!`}
+                    </h2>
+                    <p className="text-neutral-500">
+                      {turnPlayerQueue.length > 0 
+                        ? (language === "de" 
+                            ? "Song wird gleich abgespielt..." 
+                            : "Song playing soon...")
+                        : (language === "de" 
+                            ? "Warte auf einen Song von diesem DJ..." 
+                            : "Waiting for a song from this DJ...")}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <h2 className="text-3xl font-bold italic text-neutral-400">
+                      {language === "de" ? "Warte auf Tracks..." : "Waiting for tracks..."}
+                    </h2>
+                    <p className="text-neutral-600">
+                      {language === "de" 
+                        ? "Die Warteschlange ist leer. Füge Songs auf deinem Handy hinzu!" 
+                        : "The queue is empty. Add some fire on your phones!"}
+                    </p>
+                  </>
+                )}
             </div>
+            
+            {/* Skip turn button when waiting for someone with empty queue */}
+            {turnPlayer && turnPlayerQueue.length === 0 && room.queue_items.some(q => q.status === "PENDING") && (
+              <button 
+                onClick={handleNextSong}
+                className="px-6 py-3 bg-neutral-800 hover:bg-neutral-700 rounded-xl font-bold text-sm text-neutral-300 flex items-center space-x-2 transition-colors"
+              >
+                <SkipForward size={16} />
+                <span>{language === "de" ? "Zug überspringen" : "Skip Turn"}</span>
+              </button>
+            )}
         </div>
         <div className="flex items-center justify-between px-4 py-4 shrink-0 h-20 border-t border-neutral-900/50">
             <div className="flex items-center space-x-8 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setShowPlayers(true)}>
                 <div className="flex -space-x-3">
                     {room.players.map((p, i) => (
-                        <div key={p.id} className={`w-10 h-10 rounded-full border-2 bg-neutral-800 flex items-center justify-center font-bold text-xs ${p.is_vip ? 'border-yellow-500 text-yellow-500' : 'border-neutral-950 text-white'}`} style={{ zIndex: room.players.length - i }}>
+                        <div key={p.id} className={`w-10 h-10 rounded-full border-2 bg-neutral-800 flex items-center justify-center font-bold text-xs ${
+                          p.id === turnPlayer?.id 
+                            ? 'border-indigo-500 text-indigo-500 ring-2 ring-indigo-500/50' 
+                            : p.is_vip 
+                              ? 'border-yellow-500 text-yellow-500' 
+                              : 'border-neutral-950 text-white'
+                        }`} style={{ zIndex: room.players.length - i }}>
                             {p.nickname[0].toUpperCase()}
                         </div>
                     ))}
@@ -291,15 +480,51 @@ export default function GameView({ room }: GameViewProps) {
             <h1 className="text-3xl font-black max-w-xl truncate leading-none">{activePlayer ? (language === "de" ? `${activePlayer.nickname}s Wahl` : `${activePlayer.nickname}'s Pick`) : t("nextUp")}</h1>
         </div>
         <div className="flex flex-col items-end">
-            <div className={`flex items-center space-x-3 px-5 py-1.5 rounded-2xl border-2 font-mono text-3xl font-black transition-colors ${timeLeft < 20 ? "border-red-500 text-red-500 animate-pulse" : "border-neutral-800 text-white"}`}>
-                <Clock size={20} />
+            <div className={`flex items-center space-x-3 px-5 py-1.5 rounded-2xl border-2 font-mono text-3xl font-black transition-colors ${
+              room.status === "PAUSED" 
+                ? "border-yellow-500 text-yellow-500" 
+                : timeLeft <= 0 && room.auto_skip === false
+                  ? "border-green-500 text-green-500"
+                  : timeLeft < 20 
+                    ? "border-red-500 text-red-500 animate-pulse" 
+                    : "border-neutral-800 text-white"
+            }`}>
+                {room.status === "PAUSED" ? <Pause size={20} /> : <Clock size={20} />}
                 <span>{Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, "0")}</span>
+                {room.status === "PAUSED" && <span className="text-xs uppercase tracking-wider ml-2">{language === "de" ? "Pausiert" : "Paused"}</span>}
+                {timeLeft <= 0 && room.auto_skip === false && room.status !== "PAUSED" && (
+                  <span className="text-xs uppercase tracking-wider ml-2">{language === "de" ? "Bereit" : "Ready"}</span>
+                )}
             </div>
         </div>
       </div>
-      <div className="flex-1 min-h-0 w-full relative bg-black rounded-3xl overflow-hidden border border-neutral-800 shadow-[0_0_100px_rgba(79,70,229,0.1)]">
+      <div 
+        className="flex-1 min-h-0 w-full relative bg-black rounded-3xl overflow-hidden border border-neutral-800 shadow-[0_0_100px_rgba(79,70,229,0.1)] cursor-pointer group"
+        onClick={togglePause}
+      >
         {!isPlayerReady && <div className="absolute inset-0 z-30 bg-neutral-900 flex items-center justify-center"><Loader2 className="animate-spin text-indigo-500" size={48} /></div>}
-        <iframe key={room.current_video_id} className="absolute inset-0 w-full h-full border-none" src={`https://www.youtube.com/embed/${room.current_video_id}?autoplay=1&start=${room.current_start_time}&controls=0&modestbranding=1&rel=0`} title="YouTube video player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" onLoad={() => setIsPlayerReady(true)} />
+        
+        {/* Pause Overlay */}
+        {room.status === "PAUSED" && (
+          <div className="absolute inset-0 z-40 bg-black/70 flex flex-col items-center justify-center animate-in fade-in duration-300">
+            <div className="bg-neutral-900/80 p-8 rounded-full border border-neutral-700 mb-4">
+              <Play size={64} className="text-white" fill="currentColor" />
+            </div>
+            <p className="text-neutral-400 text-lg font-medium">{language === "de" ? "Klicken zum Fortsetzen" : "Click to resume"}</p>
+          </div>
+        )}
+        
+        {/* Click hint on hover when playing */}
+        {room.status === "PLAYING" && (
+          <div className="absolute top-4 right-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+            <div className="bg-black/70 backdrop-blur-sm px-3 py-1.5 rounded-full flex items-center space-x-2 text-neutral-400 text-xs">
+              <Pause size={12} />
+              <span>{language === "de" ? "Klicken zum Pausieren" : "Click to pause"}</span>
+            </div>
+          </div>
+        )}
+        
+        <iframe key={room.current_video_id} className={`absolute inset-0 w-full h-full border-none transition-opacity ${room.status === "PAUSED" ? "opacity-50" : ""}`} src={`https://www.youtube.com/embed/${room.current_video_id}?autoplay=${room.status === "PLAYING" ? 1 : 0}&start=${room.current_start_time}&controls=0&modestbranding=1&rel=0`} title="YouTube video player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" onLoad={() => setIsPlayerReady(true)} />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
         
         {/* Hype Meter Overlay */}
@@ -326,6 +551,9 @@ export default function GameView({ room }: GameViewProps) {
             </button>
             <button onClick={() => setShowSettings(true)} className="p-3 rounded-full bg-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-700 transition-colors" title={t("settings")}>
                 <Settings size={20} />
+            </button>
+            <button onClick={togglePause} className={`p-3 rounded-full transition-colors ${room.status === "PAUSED" ? "bg-green-500 text-white" : "bg-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-700"}`} title={room.status === "PAUSED" ? (language === "de" ? "Fortsetzen" : "Resume") : (language === "de" ? "Pause" : "Pause")}>
+                {room.status === "PAUSED" ? <Play size={20} fill="currentColor" /> : <Pause size={20} />}
             </button>
             <button onClick={handleNextSong} className="group flex items-center space-x-2 text-neutral-500 hover:text-white transition-colors">
                 <span className="font-bold uppercase tracking-widest text-xs">{language === "de" ? "Überspringen" : "Skip Song"}</span>

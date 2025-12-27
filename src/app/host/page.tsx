@@ -136,9 +136,9 @@ export default function HostPage() {
     </div>
   );
 
-  if (room?.status === "PLAYING") {
+  if (room?.status === "PLAYING" || room?.status === "PAUSED") {
     return (
-      <div className="h-screen bg-neutral-950 text-white flex flex-col items-center justify-center p-6 relative">
+      <div className="h-screen bg-neutral-950 text-white flex flex-col items-center justify-center p-6 relative tv-scale">
         <div className="absolute top-6 left-6 z-50 flex items-center space-x-4">
             <div className="cursor-pointer" onClick={() => setShowQuitModal(true)}>
                 <div className="flex items-center space-x-2 text-neutral-500 hover:text-white transition-colors opacity-50 hover:opacity-100">

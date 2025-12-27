@@ -3,6 +3,8 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* Base scale factor for responsive sizing */
+  --scale-factor: 1;
 }
 
 @theme inline {
@@ -19,8 +21,79 @@
   }
 }
 
+/* Responsive scaling for TV screens (host view) */
+/* Standard HD (1920x1080) - baseline */
+@media screen and (min-width: 1920px) and (min-height: 1080px) {
+  :root {
+    --scale-factor: 1;
+  }
+}
+
+/* 1440p (2560x1440) */
+@media screen and (min-width: 2560px) and (min-height: 1440px) {
+  :root {
+    --scale-factor: 1.15;
+  }
+}
+
+/* 4K UHD (3840x2160) */
+@media screen and (min-width: 3840px) and (min-height: 2160px) {
+  :root {
+    --scale-factor: 1.5;
+  }
+}
+
+/* Smaller screens (laptop on smaller display) */
+@media screen and (max-width: 1366px) {
+  :root {
+    --scale-factor: 0.85;
+  }
+}
+
+@media screen and (max-width: 1024px) {
+  :root {
+    --scale-factor: 0.75;
+  }
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* TV-optimized host view scaling */
+.tv-scale {
+  font-size: calc(1rem * var(--scale-factor));
+}
+
+/* Scale icons and spacing proportionally in TV view */
+.tv-scale .tv-icon {
+  transform: scale(var(--scale-factor));
+}
+
+/* Responsive text scaling utilities for host view */
+.tv-scale .tv-text-xs { font-size: calc(0.75rem * var(--scale-factor)); }
+.tv-scale .tv-text-sm { font-size: calc(0.875rem * var(--scale-factor)); }
+.tv-scale .tv-text-base { font-size: calc(1rem * var(--scale-factor)); }
+.tv-scale .tv-text-lg { font-size: calc(1.125rem * var(--scale-factor)); }
+.tv-scale .tv-text-xl { font-size: calc(1.25rem * var(--scale-factor)); }
+.tv-scale .tv-text-2xl { font-size: calc(1.5rem * var(--scale-factor)); }
+.tv-scale .tv-text-3xl { font-size: calc(1.875rem * var(--scale-factor)); }
+.tv-scale .tv-text-4xl { font-size: calc(2.25rem * var(--scale-factor)); }
+.tv-scale .tv-text-5xl { font-size: calc(3rem * var(--scale-factor)); }
+.tv-scale .tv-text-6xl { font-size: calc(3.75rem * var(--scale-factor)); }
+.tv-scale .tv-text-7xl { font-size: calc(4.5rem * var(--scale-factor)); }
+.tv-scale .tv-text-8xl { font-size: calc(6rem * var(--scale-factor)); }
+.tv-scale .tv-text-9xl { font-size: calc(8rem * var(--scale-factor)); }
+
+/* Scaled spacing utilities */
+.tv-scale .tv-p-2 { padding: calc(0.5rem * var(--scale-factor)); }
+.tv-scale .tv-p-4 { padding: calc(1rem * var(--scale-factor)); }
+.tv-scale .tv-p-6 { padding: calc(1.5rem * var(--scale-factor)); }
+.tv-scale .tv-p-8 { padding: calc(2rem * var(--scale-factor)); }
+
+.tv-scale .tv-gap-2 { gap: calc(0.5rem * var(--scale-factor)); }
+.tv-scale .tv-gap-4 { gap: calc(1rem * var(--scale-factor)); }
+.tv-scale .tv-gap-6 { gap: calc(1.5rem * var(--scale-factor)); }
+.tv-scale .tv-gap-8 { gap: calc(2rem * var(--scale-factor)); }

@@ -2,13 +2,13 @@
 
 import { db } from "@/lib/db";
 import { useSearchParams } from "next/navigation";
-import { Loader2, Music4, Radio, Languages } from "lucide-react";
+import { Loader2, Music4, Radio, Languages, Clock, Crown, Play } from "lucide-react";
 import { Suspense, useState, useEffect } from "react";
 import { id } from "@instantdb/react";
 import SearchStep from "@/components/player/SearchStep";
 import ClipperStep from "@/components/player/ClipperStep";
 import SuccessStep from "@/components/player/SuccessStep";
-import { Trash2, Home, ThumbsUp, ThumbsDown, Edit2 } from "lucide-react";
+import { Trash2, Home, ThumbsUp, ThumbsDown, Edit2, Pause } from "lucide-react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import InputModal from "@/components/ui/InputModal";
 import VIPControls from "@/components/player/VIPControls";
@@ -55,7 +55,8 @@ function PlayContent() {
   const myQueue = player?.queue_items || [];
   const isVip = player?.is_vip || false;
   
-  const activeQueueItem = room?.queue_items?.find(q => q.id === room.active_player_id);
+  const activeQueueItem = room?.queue_items?.find(q => q.id === room?.active_queue_item_id);
+  const isMyTurn = room?.active_player_id === playerId;
 
   // Sync local vote with DB when song changes or DB updates
   useEffect(() => {
@@ -149,6 +150,17 @@ function PlayContent() {
 
   // Lobby View
   if (room.status === "LOBBY") {
+    const handleStartParty = () => {
+      db.transact(db.tx.rooms[roomId].update({ 
+        status: "PLAYING", 
+        playback_started_at: Date.now() 
+      }));
+    };
+
+    const updateTimer = (sec: number) => {
+      db.transact(db.tx.rooms[roomId].update({ timer_duration: sec }));
+    };
+
     return (
       <div className="min-h-screen bg-neutral-950 text-white flex flex-col p-6">
         <header className="flex justify-between items-center mb-8 opacity-50">
@@ -200,9 +212,54 @@ function PlayContent() {
           <div className="space-y-2 max-w-xs">
             <h2 className="text-2xl font-bold">{language === "de" ? "Du bist drin!" : "You're in!"}</h2>
             <p className="text-neutral-500">
-              {language === "de" ? "Warte auf den Host, um das Spiel zu starten. Überleg dir schonmal deine Lieblingssongs!" : "Waiting for the host to start the game. Get your favorite songs ready in your mind!"}
+              {isVip 
+                ? (language === "de" ? "Als VIP kannst du die Party starten und Einstellungen ändern!" : "As VIP, you can start the party and change settings!")
+                : (language === "de" ? "Warte auf den Host, um das Spiel zu starten. Überleg dir schonmal deine Lieblingssongs!" : "Waiting for the host to start the game. Get your favorite songs ready in your mind!")
+              }
             </p>
           </div>
+
+          {/* VIP Lobby Controls */}
+          {isVip && (
+            <div className="w-full max-w-sm space-y-6 bg-neutral-900/80 border border-yellow-500/30 rounded-2xl p-6 animate-in fade-in zoom-in">
+              <div className="flex items-center justify-center space-x-2 text-yellow-500 font-bold uppercase tracking-widest text-xs">
+                <Crown size={14} fill="currentColor" />
+                <span>{language === "de" ? "VIP Steuerung" : "VIP Controls"}</span>
+              </div>
+              
+              {/* Timer Setting */}
+              <div className="space-y-3">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 flex items-center justify-center space-x-1">
+                  <Clock size={10} />
+                  <span>{t("timerDuration")}</span>
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[60, 90, 120, 180].map((sec) => (
+                    <button
+                      key={sec}
+                      onClick={() => updateTimer(sec)}
+                      className={`py-2 rounded-lg font-bold text-xs border transition-all ${
+                        (room.timer_duration || 120) === sec 
+                          ? "border-indigo-500 bg-indigo-500/20 text-white" 
+                          : "border-neutral-800 bg-neutral-800/50 text-neutral-400"
+                      }`}
+                    >
+                      {sec}s
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Start Button */}
+              <button 
+                onClick={handleStartParty}
+                className="w-full py-4 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-xl font-bold text-white flex items-center justify-center space-x-2 hover:opacity-90 transition-all shadow-lg shadow-indigo-500/20"
+              >
+                <Play size={20} fill="currentColor" />
+                <span>{t("startParty")}</span>
+              </button>
+            </div>
+          )}
 
           <div className="pt-8 flex items-center space-x-2 text-xs text-neutral-600 uppercase tracking-widest">
             <Music4 size={12} />
@@ -256,7 +313,7 @@ function PlayContent() {
     );
   }
 
-  // Game View (PLAYING)
+  // Game View (PLAYING or PAUSED)
   return (
     <div className="min-h-screen bg-neutral-950 text-white flex flex-col p-6">
       <header className="flex flex-col space-y-4 mb-8 opacity-100">
@@ -277,8 +334,30 @@ function PlayContent() {
             </div>
         </div>
 
+        {/* Paused indicator */}
+        {room.status === "PAUSED" && (
+          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-3 flex items-center justify-center space-x-2 text-yellow-500 animate-in fade-in">
+            <Pause size={16} />
+            <span className="font-bold text-sm">{language === "de" ? "Party pausiert" : "Party paused"}</span>
+          </div>
+        )}
+
+        {/* It's your turn indicator */}
+        {isMyTurn && !activeQueueItem && room.status !== "PAUSED" && (
+          <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-xl p-4 flex flex-col items-center justify-center space-y-2 text-indigo-400 animate-in fade-in animate-pulse">
+            <span className="font-bold text-lg">
+              {language === "de" ? "🎵 Du bist dran!" : "🎵 It's your turn!"}
+            </span>
+            <span className="text-sm text-indigo-300/70">
+              {myQueue.length > 0 
+                ? (language === "de" ? "Dein Song wird gleich abgespielt..." : "Your song will play soon...")
+                : (language === "de" ? "Füge schnell einen Song hinzu!" : "Quick, add a song!")}
+            </span>
+          </div>
+        )}
+
         {/* Voting UI - Only when song is playing */}
-        {activeQueueItem && (
+        {activeQueueItem && room.status !== "PAUSED" && (
             <div className="bg-neutral-900/80 p-4 rounded-2xl flex flex-col space-y-4 border border-neutral-800 animate-in slide-in-from-top-2">
                 <div className="flex items-center justify-between">
                     <div className="flex flex-col overflow-hidden mr-4">

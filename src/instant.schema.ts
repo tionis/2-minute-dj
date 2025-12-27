@@ -10,9 +10,13 @@ const _schema = i.schema({
       current_video_id: i.string().optional(),
       current_start_time: i.number().optional(),
       playback_started_at: i.number().optional(),
-      active_player_id: i.string().optional(),
+      active_player_id: i.string().optional(), // Currently whose turn it is (player id)
+      active_queue_item_id: i.string().optional(), // Currently playing queue item id
       timer_duration: i.number().optional(), // Default 120
       paused_at: i.number().optional(), // For pause functionality
+      auto_skip: i.boolean().optional(), // Whether to auto-skip when timer ends (default true)
+      player_order: i.json().optional(), // Array of player IDs for turn order
+      current_turn_index: i.number().optional(), // Index in player_order for whose turn it is
       created_at: i.number(),
     }),
     players: i.entity({
