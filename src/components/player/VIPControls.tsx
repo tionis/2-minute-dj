@@ -1,118 +1,116 @@
 "use client";
 
-import { db } from "@/lib/db";
-import { AppSchema } from "@/instant.schema";
-import { InstaQLEntity } from "@instantdb/react";
+import { useGameStore } from "@/lib/game-context";
 import { SkipForward, Pause, Play, Users, Clock, Trash2, Crown, Plus } from "lucide-react";
 import { useState } from "react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useI18n } from "@/components/LanguageProvider";
-
-type Room = InstaQLEntity<AppSchema, "rooms">;
-type Player = InstaQLEntity<AppSchema, "players">;
-type QueueItem = InstaQLEntity<AppSchema, "queue_items">;
+import { Room, Player, QueueItem } from "@/lib/types";
 
 interface VIPControlsProps {
-  room: Room & { players: Player[] };
-  queueItems: QueueItem[]; // Need full queue for skip logic
+  room: Room;
+  players: Player[]; // Array
+  queueItems: QueueItem[]; // Array
 }
 
-export default function VIPControls({ room, queueItems }: VIPControlsProps) {
+export default function VIPControls({ room, players, queueItems }: VIPControlsProps) {
   const { t, language } = useI18n();
+  const { updateState } = useGameStore();
   const [kickPlayerId, setKickPlayerId] = useState<string | null>(null);
   const [kickPlayerName, setKickPlayerName] = useState("");
 
   // Get or initialize player order
-  const getPlayerOrder = (): string[] => {
-    if (room.player_order && Array.isArray(room.player_order)) {
-      const validPlayers = (room.player_order as string[]).filter(
-        pid => room.players.some(p => p.id === pid)
+  const getPlayerOrder = (currentPlayers: Player[], currentOrder?: string[]): string[] => {
+    if (currentOrder && Array.isArray(currentOrder)) {
+      const validPlayers = currentOrder.filter(
+        pid => currentPlayers.some(p => p.id === pid)
       );
-      const newPlayers = room.players
+      const newPlayers = currentPlayers
         .filter(p => !validPlayers.includes(p.id))
         .map(p => p.id);
       return [...validPlayers, ...newPlayers];
     }
-    return room.players.map(p => p.id);
+    return currentPlayers.map(p => p.id);
   };
 
   const handleSkip = () => {
-    const activeItem = queueItems.find(q => q.id === room.active_queue_item_id);
-    const txs = [];
-    
-    if (activeItem) {
-      txs.push(db.tx.queue_items[activeItem.id].update({ status: "PLAYED" }));
-    }
+    updateState(doc => {
+        const activeItem = doc.queue_items[doc.room.active_queue_item_id || ""];
+        
+        if (activeItem) {
+            activeItem.status = "PLAYED";
+        }
 
-    const playerOrder = getPlayerOrder();
-    if (playerOrder.length === 0) {
-      txs.push(db.tx.rooms[room.id].update({
-        current_video_id: null,
-        active_player_id: null,
-        active_queue_item_id: null,
-        playback_started_at: null,
-      }));
-      db.transact(txs);
-      return;
-    }
+        const currentPlayers = Object.values(doc.players);
+        const playerOrder = getPlayerOrder(currentPlayers, doc.room.player_order);
 
-    // Calculate next turn
-    let nextTurnIndex = ((room.current_turn_index as number) ?? -1) + 1;
-    const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
-    
-    // Find the next player's pending queue item
-    const nextPlayerQueue = queueItems
-      .filter(q => 
-        q.status === "PENDING" && 
-        (q as any).player?.id === nextPlayerId
-      )
-      .sort((a, b) => a.created_at - b.created_at);
+        if (playerOrder.length === 0) {
+            delete doc.room.current_video_id;
+            delete doc.room.active_player_id;
+            delete doc.room.active_queue_item_id;
+            delete doc.room.playback_started_at;
+            return;
+        }
 
-    if (nextPlayerQueue.length > 0) {
-      const nextItem = nextPlayerQueue[0];
-      txs.push(db.tx.rooms[room.id].update({
-        current_video_id: nextItem.video_id,
-        current_start_time: nextItem.highlight_start,
-        playback_started_at: Date.now(),
-        active_player_id: nextPlayerId,
-        active_queue_item_id: nextItem.id,
-        player_order: playerOrder,
-        current_turn_index: nextTurnIndex % playerOrder.length,
-      }));
-    } else {
-      txs.push(db.tx.rooms[room.id].update({
-        current_video_id: null,
-        active_player_id: nextPlayerId,
-        active_queue_item_id: null,
-        playback_started_at: null,
-        player_order: playerOrder,
-        current_turn_index: nextTurnIndex % playerOrder.length,
-      }));
-    }
-    
-    db.transact(txs);
+        let nextTurnIndex = (doc.room.current_turn_index ?? -1);
+        let foundSong = false;
+        let attempts = 0;
+
+        while (attempts < playerOrder.length) {
+            nextTurnIndex = (nextTurnIndex + 1);
+            const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
+            
+            const nextPlayerQueue = Object.values(doc.queue_items)
+                .filter(q => q.status === "PENDING" && q.player_id === nextPlayerId)
+                .sort((a, b) => a.created_at - b.created_at);
+            
+            if (nextPlayerQueue.length > 0) {
+                const nextItem = nextPlayerQueue[0];
+                doc.room.current_video_id = nextItem.video_id;
+                doc.room.current_start_time = nextItem.highlight_start;
+                doc.room.playback_started_at = Date.now();
+                doc.room.active_player_id = nextPlayerId;
+                doc.room.active_queue_item_id = nextItem.id;
+                doc.room.player_order = playerOrder;
+                doc.room.current_turn_index = nextTurnIndex % playerOrder.length;
+                foundSong = true;
+                break;
+            }
+            attempts++;
+        }
+
+        if (!foundSong) {
+             nextTurnIndex = (doc.room.current_turn_index ?? -1) + 1;
+             const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
+
+             delete doc.room.current_video_id;
+             doc.room.active_player_id = nextPlayerId;
+             delete doc.room.active_queue_item_id;
+             delete doc.room.playback_started_at;
+             doc.room.player_order = playerOrder;
+             doc.room.current_turn_index = nextTurnIndex % playerOrder.length;
+        }
+    });
   };
 
   const togglePause = () => {
-      if (room.status === "PLAYING") {
-          db.transact(db.tx.rooms[room.id].update({ 
-              status: "PAUSED",
-              paused_at: Date.now()
-          }));
-      } else {
-          const pauseDuration = room.paused_at ? Date.now() - room.paused_at : 0;
-          const newStart = (room.playback_started_at || Date.now()) + pauseDuration;
-          
-          db.transact(db.tx.rooms[room.id].update({ 
-              status: "PLAYING",
-              playback_started_at: newStart,
-              paused_at: null
-          }));
-      }
+      updateState(doc => {
+          if (doc.room.status === "PLAYING") {
+              doc.room.status = "PAUSED";
+              doc.room.paused_at = Date.now();
+          } else {
+              const pauseDuration = doc.room.paused_at ? Date.now() - doc.room.paused_at : 0;
+              const newStart = (doc.room.playback_started_at || Date.now()) + pauseDuration;
+              
+              doc.room.status = "PLAYING";
+              doc.room.playback_started_at = newStart;
+              delete doc.room.paused_at;
+          }
+      });
   };
 
   const updateTimer = (sec: number) => {
-      db.transact(db.tx.rooms[room.id].update({ timer_duration: sec }));
+      updateState(doc => doc.room.timer_duration = sec);
   };
 
   const kickPlayer = (pId: string, name: string) => {
@@ -122,15 +120,18 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
 
   const confirmKick = () => {
       if (kickPlayerId) {
-          db.transact(db.tx.players[kickPlayerId].delete());
+          updateState(doc => {
+              delete doc.players[kickPlayerId];
+          });
           setKickPlayerId(null);
       }
   };
 
   const addTime = (seconds: number) => {
-      if (!room.playback_started_at) return;
-      const newStart = room.playback_started_at + (seconds * 1000);
-      db.transact(db.tx.rooms[room.id].update({ playback_started_at: newStart }));
+      updateState(doc => {
+          if (!doc.room.playback_started_at) return;
+          doc.room.playback_started_at += (seconds * 1000);
+      });
   };
 
   return (
@@ -205,15 +206,15 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
                     </span>
                 </div>
                 <button 
-                    onClick={() => db.transact(db.tx.rooms[room.id].update({ auto_skip: (room as any).auto_skip === false }))}
+                    onClick={() => updateState(doc => doc.room.auto_skip = doc.room.auto_skip === false)}
                     className={`relative w-12 h-6 rounded-full transition-colors ${
-                        (room as any).auto_skip !== false 
+                        room.auto_skip !== false 
                             ? "bg-indigo-500" 
                             : "bg-neutral-700"
                     }`}
                 >
                     <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
-                        (room as any).auto_skip !== false 
+                        room.auto_skip !== false 
                             ? "translate-x-6" 
                             : "translate-x-0.5"
                     }`} />
@@ -228,7 +229,7 @@ export default function VIPControls({ room, queueItems }: VIPControlsProps) {
                 <span>{t("managePlayers")}</span>
             </label>
             <div className="max-h-40 overflow-y-auto space-y-2 pr-1">
-                {room.players.map((p) => (
+                {players.map((p) => (
                     <div key={p.id} className="flex items-center justify-between bg-neutral-800/50 p-2 rounded-lg">
                         <span className="text-sm font-medium truncate pl-1">{p.nickname}</span>
                         <button 

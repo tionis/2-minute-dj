@@ -1,10 +1,9 @@
 "use client";
 
-import { db } from "@/lib/db";
+import { useGameStore } from "@/lib/game-context";
 import { useSearchParams } from "next/navigation";
 import { Loader2, Music4, Radio, Languages, Clock, Crown, Play, SkipForward } from "lucide-react";
 import { Suspense, useState, useEffect } from "react";
-import { id } from "@instantdb/react";
 import SearchStep from "@/components/player/SearchStep";
 import ClipperStep from "@/components/player/ClipperStep";
 import SuccessStep from "@/components/player/SuccessStep";
@@ -19,8 +18,16 @@ import { useI18n } from "@/components/LanguageProvider";
 function PlayContent() {
   const { t, language, setLanguage } = useI18n();
   const searchParams = useSearchParams();
-  const roomId = searchParams.get("roomId");
-  const playerId = searchParams.get("playerId");
+  const urlRoomId = searchParams.get("roomId");
+  
+  const { state, updateState, peerId, setRoomId, roomId, isConnected } = useGameStore();
+
+  // If we arrived here with a room ID in URL but not connected, connect.
+  useEffect(() => {
+      if (urlRoomId && urlRoomId !== roomId) {
+          setRoomId(urlRoomId);
+      }
+  }, [urlRoomId, roomId, setRoomId]);
 
   // Game State
   const [step, setStep] = useState<"SEARCH" | "CLIP" | "SUCCESS">("SEARCH");
@@ -30,33 +37,18 @@ function PlayContent() {
   const [deleteItemId, setDeleteItem] = useState<string | null>(null);
   const [localVote, setLocalVote] = useState(50);
 
-  const { data, isLoading, error } = db.useQuery(
-    roomId && playerId
-      ? {
-          rooms: {
-            $: { where: { id: roomId } },
-            players: {}, 
-            queue_items: { 
-                 $: { where: {  } } 
-            }
-          },
-          players: {
-            $: { where: { id: playerId } },
-            queue_items: { 
-                $: { where: { status: "PENDING" } }
-            }
-          },
-        }
-      : null
-  );
-
-  const room = data?.rooms?.[0];
-  const player = data?.players?.[0];
-  const myQueue = player?.queue_items || [];
+  const room = state.room;
+  const player = state.players[peerId];
+  
+  // Derived data
+  const myQueue = Object.values(state.queue_items)
+      .filter(q => q.player_id === peerId)
+      .sort((a,b) => a.created_at - b.created_at);
+      
   const isVip = player?.is_vip || false;
   
-  const activeQueueItem = room?.queue_items?.find(q => q.id === room?.active_queue_item_id);
-  const isMyTurn = room?.active_player_id === playerId;
+  const activeQueueItem = state.queue_items[room.active_queue_item_id || ""];
+  const isMyTurn = room.active_player_id === peerId;
 
   // Sync local vote with DB when song changes or DB updates
   useEffect(() => {
@@ -67,47 +59,53 @@ function PlayContent() {
       }
   }, [activeQueueItem?.id, player?.id]);
 
-  if (!roomId || !playerId) {
+  if (!roomId || !peerId) {
     return <div className="text-white p-8">Missing parameters. Please join again.</div>;
   }
 
-  if (isLoading) {
+  // We don't have explicit loading state for "query", but we can check if room code is synced
+  if (!room.code || !isConnected) {
     return (
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
-        <Loader2 className="animate-spin" size={32} />
+      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-white space-y-4">
+        <Loader2 className="animate-spin text-indigo-500" size={32} />
+        <p className="text-neutral-500 text-sm">Syncing party state...</p>
       </div>
     );
   }
 
-  if (error) {
-    return <div className="text-red-500 p-8">Error: {error.message}</div>;
-  }
-
-  if (!room || !player) {
-    return <div className="text-white p-8">Room or Player not found.</div>;
+  if (!player) {
+    // Player not found in state (maybe kicked or state lost)
+    // We could redirect to join?
+    return <div className="text-white p-8">Player not found in room. You may have been kicked or the room was closed.</div>;
   }
 
   const commitVote = () => {
       if (!activeQueueItem) return;
-      const currentVotes = activeQueueItem.votes || {};
-      const newVotes = { ...currentVotes, [player.id]: localVote };
-      db.transact(db.tx.queue_items[activeQueueItem.id].update({ votes: newVotes }));
+      updateState(doc => {
+          const item = doc.queue_items[activeQueueItem.id];
+          if (item) {
+              if (!item.votes) item.votes = {};
+              item.votes[peerId] = localVote;
+          }
+      });
   };
 
   const handleQueue = (startTime: number) => {
     if (!videoData) return;
 
-    const queueId = id();
-    db.transact(
-        db.tx.queue_items[queueId].update({
+    const queueId = crypto.randomUUID();
+    updateState(doc => {
+        doc.queue_items[queueId] = {
+            id: queueId,
             video_id: videoData.id,
             video_title: videoData.title,
             highlight_start: startTime,
             status: "PENDING",
             created_at: Date.now(),
-        })
-        .link({ room: roomId, player: playerId })
-    );
+            player_id: peerId,
+            room_id: roomId,
+        };
+    });
     setStep("SUCCESS");
   };
 
@@ -117,17 +115,24 @@ function PlayContent() {
 
   const handleDeleteConfirm = () => {
       if (deleteItemId) {
-          db.transact(db.tx.queue_items[deleteItemId].delete());
+          updateState(doc => {
+              delete doc.queue_items[deleteItemId];
+          });
           setDeleteItem(null);
       }
   };
 
   const handleChangeName = (newName: string) => {
-      db.transact(db.tx.players[player.id].update({ nickname: newName }));
+      updateState(doc => {
+          if (doc.players[peerId]) {
+              doc.players[peerId].nickname = newName;
+          }
+      });
       setShowNameModal(false);
   };
 
   const handleQuitConfirm = () => {
+      setRoomId(""); // Disconnect
       window.location.href = "/";
   };
 
@@ -151,14 +156,14 @@ function PlayContent() {
   // Lobby View
   if (room.status === "LOBBY") {
     const handleStartParty = () => {
-      db.transact(db.tx.rooms[roomId].update({ 
-        status: "PLAYING", 
-        playback_started_at: Date.now() 
-      }));
+      updateState(doc => {
+          doc.room.status = "PLAYING";
+          doc.room.playback_started_at = Date.now();
+      });
     };
 
     const updateTimer = (sec: number) => {
-      db.transact(db.tx.rooms[roomId].update({ timer_duration: sec }));
+      updateState(doc => doc.room.timer_duration = sec);
     };
 
     return (
@@ -264,15 +269,15 @@ function PlayContent() {
                   </div>
                 </div>
                 <button 
-                  onClick={() => db.transact(db.tx.rooms[roomId].update({ auto_skip: (room as any).auto_skip === false }))}
+                  onClick={() => updateState(doc => doc.room.auto_skip = doc.room.auto_skip === false)}
                   className={`relative w-12 h-6 rounded-full transition-colors ${
-                    (room as any).auto_skip !== false 
+                    room.auto_skip !== false 
                       ? "bg-indigo-500" 
                       : "bg-neutral-700"
                   }`}
                 >
                   <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
-                    (room as any).auto_skip !== false 
+                    room.auto_skip !== false 
                       ? "translate-x-6" 
                       : "translate-x-0.5"
                   }`} />
@@ -318,7 +323,7 @@ function PlayContent() {
             <Edit2 size={12} className="opacity-50" />
           </div>
         </header>
-        <SummaryView room={room as any} />
+        <SummaryView />
         <ConfirmationModal 
             isOpen={showQuitModal}
             onCancel={() => setShowQuitModal(false)}
@@ -521,7 +526,7 @@ function PlayContent() {
 
         {/* VIP Controls */}
         {isVip && (
-            <VIPControls room={room as any} queueItems={room.queue_items} />
+            <VIPControls room={room} players={Object.values(state.players)} queueItems={Object.values(state.queue_items)} />
         )}
     </div>
   );

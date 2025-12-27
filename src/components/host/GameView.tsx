@@ -1,24 +1,21 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { db } from "@/lib/db";
-import { AppSchema } from "@/instant.schema";
-import { InstaQLEntity } from "@instantdb/react";
+import { useGameStore } from "@/lib/game-context";
 import { Loader2, Music, User, SkipForward, Clock, Play, Settings, X, Crown, Pause } from "lucide-react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useI18n } from "@/components/LanguageProvider";
 import HypeMeter from "./HypeMeter";
 
-type Room = InstaQLEntity<AppSchema, "rooms">;
-type Player = InstaQLEntity<AppSchema, "players">;
-type QueueItem = InstaQLEntity<AppSchema, "queue_items">;
-
-interface GameViewProps {
-  room: Room & { players: Player[]; queue_items: QueueItem[] };
-}
-
-export default function GameView({ room }: GameViewProps) {
+export default function GameView() {
   const { t, language } = useI18n();
+  const { state, updateState } = useGameStore();
+  
+  const room = state.room;
+  // Denormalize for easier usage
+  const players = Object.values(state.players);
+  const queueItems = Object.values(state.queue_items);
+
   const [timeLeft, setTimeLeft] = useState(room.timer_duration || 120);
   const [isEnding, setIsEnding] = useState(false);
   const [isPlayerReady, setIsPlayerReady] = useState(false);
@@ -26,15 +23,15 @@ export default function GameView({ room }: GameViewProps) {
   const [showPlayers, setShowPlayers] = useState(false);
   const [kickPlayerId, setKickPlayerId] = useState<string | null>(null);
   const [kickPlayerName, setKickPlayerName] = useState("");
-  const [iframeKey, setIframeKey] = useState(0); // Key to force iframe reload on resume
+  const [iframeKey, setIframeKey] = useState(0); 
   
-  const roomRef = useRef(room);
+  const stateRef = useRef(state);
   const isEndingRef = useRef(isEnding);
   
   useEffect(() => {
-      roomRef.current = room;
+      stateRef.current = state;
       isEndingRef.current = isEnding;
-  }, [room, isEnding]);
+  }, [state, isEnding]);
 
   useEffect(() => {
     setIsPlayerReady(false);
@@ -49,7 +46,7 @@ export default function GameView({ room }: GameViewProps) {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const currentRoom = roomRef.current;
+      const currentRoom = stateRef.current.room;
       // Don't update timer when paused
       if (currentRoom.status === "PAUSED" || currentRoom.status !== "PLAYING" || !currentRoom.playback_started_at) return;
       // Don't update timer when no video is playing
@@ -60,7 +57,7 @@ export default function GameView({ room }: GameViewProps) {
       const remaining = Math.max(0, duration - elapsed);
       setTimeLeft(remaining);
 
-      // Auto-skip when timer reaches 0 (if auto_skip is enabled, default true)
+      // Auto-skip when timer reaches 0
       const autoSkipEnabled = currentRoom.auto_skip !== false;
       if (remaining <= 0 && !isEndingRef.current && autoSkipEnabled) {
         setIsEnding(true); 
@@ -72,177 +69,150 @@ export default function GameView({ room }: GameViewProps) {
   }, []);
 
   useEffect(() => {
-    const pendingCount = room.queue_items.filter(q => q.status === "PENDING").length;
+    const pendingCount = Object.values(state.queue_items).filter(q => q.status === "PENDING").length;
     if (room.status === "PLAYING" && !room.current_video_id && pendingCount > 0) {
         handleNextSong();
     }
-  }, [room.status, room.current_video_id, room.queue_items]);
+  }, [room.status, room.current_video_id, state.queue_items]);
 
   const togglePause = () => {
-    if (room.status === "PLAYING") {
-      // Calculate how much video time has elapsed
-      const elapsedSeconds = room.playback_started_at 
-        ? Math.floor((Date.now() - room.playback_started_at) / 1000)
-        : 0;
-      const videoOffset = (room.current_start_time || 0) + elapsedSeconds;
-      
-      db.transact(db.tx.rooms[room.id].update({ 
-        status: "PAUSED",
-        paused_at: Date.now(),
-        current_video_offset: videoOffset
-      }));
-    } else if (room.status === "PAUSED") {
-      const pauseDuration = room.paused_at ? Date.now() - room.paused_at : 0;
-      const newStart = (room.playback_started_at || Date.now()) + pauseDuration;
-      
-      db.transact(db.tx.rooms[room.id].update({ 
-        status: "PLAYING",
-        playback_started_at: newStart,
-        paused_at: null
-      }));
-      
-      // Force iframe reload with new offset
-      setIframeKey(prev => prev + 1);
+    updateState(doc => {
+        if (doc.room.status === "PLAYING") {
+            const elapsedSeconds = doc.room.playback_started_at 
+                ? Math.floor((Date.now() - doc.room.playback_started_at) / 1000)
+                : 0;
+            const videoOffset = (doc.room.current_start_time || 0) + elapsedSeconds;
+            
+            doc.room.status = "PAUSED";
+            doc.room.paused_at = Date.now();
+            doc.room.current_video_offset = videoOffset;
+        } else if (doc.room.status === "PAUSED") {
+            const pauseDuration = doc.room.paused_at ? Date.now() - doc.room.paused_at : 0;
+            const newStart = (doc.room.playback_started_at || Date.now()) + pauseDuration;
+            
+            doc.room.status = "PLAYING";
+            doc.room.playback_started_at = newStart;
+            delete doc.room.paused_at;
+        }
+    });
+    
+    if (room.status === "PAUSED") {
+        setIframeKey(prev => prev + 1);
     }
   };
 
   // Get or initialize player order
-  const getPlayerOrder = (): string[] => {
-    if (room.player_order && Array.isArray(room.player_order)) {
-      // Filter out players who have left
-      const validPlayers = (room.player_order as string[]).filter(
-        pid => room.players.some(p => p.id === pid)
+  const getPlayerOrder = (currentPlayers: typeof players, currentOrder?: string[]): string[] => {
+    if (currentOrder && Array.isArray(currentOrder)) {
+      const validPlayers = currentOrder.filter(
+        pid => currentPlayers.some(p => p.id === pid)
       );
-      // Add any new players who joined
-      const newPlayers = room.players
+      const newPlayers = currentPlayers
         .filter(p => !validPlayers.includes(p.id))
         .sort((a, b) => a.joined_at - b.joined_at)
         .map(p => p.id);
       return [...validPlayers, ...newPlayers];
     }
-    // Initialize from players sorted by join time
-    return room.players
+    return currentPlayers
       .sort((a, b) => a.joined_at - b.joined_at)
       .map(p => p.id);
   };
 
-  // Get the current turn player
-  const getCurrentTurnPlayer = () => {
-    const playerOrder = getPlayerOrder();
-    if (playerOrder.length === 0) return null;
-    const turnIndex = room.current_turn_index ?? 0;
-    const playerId = playerOrder[turnIndex % playerOrder.length];
-    return room.players.find(p => p.id === playerId);
-  };
+  const handleNextSong = () => {
+    updateState(doc => {
+        const currentActiveItem = doc.queue_items[doc.room.active_queue_item_id || ""];
 
-  const handleNextSong = async () => {
-    const currentRoom = roomRef.current;
-    const currentActiveItem = currentRoom.queue_items.find(
-      q => q.id === currentRoom.active_queue_item_id
-    );
+        // Mark played
+        if (currentActiveItem) {
+            currentActiveItem.status = "PLAYED";
+        }
 
-    const txs = [];
-    
-    // Mark current item as played
-    if (currentActiveItem) {
-      txs.push(db.tx.queue_items[currentActiveItem.id].update({ status: "PLAYED" }));
-    }
+        const currentPlayers = Object.values(doc.players);
+        const playerOrder = getPlayerOrder(currentPlayers, doc.room.player_order);
 
-    // Get/update player order
-    const playerOrder = getPlayerOrder();
-    if (playerOrder.length === 0) {
-      txs.push(db.tx.rooms[currentRoom.id].update({
-        current_video_id: null,
-        active_player_id: null,
-        active_queue_item_id: null,
-        playback_started_at: null,
-      }));
-      await db.transact(txs);
-      setIsEnding(false);
-      return;
-    }
+        if (playerOrder.length === 0) {
+            delete doc.room.current_video_id;
+            delete doc.room.active_player_id;
+            delete doc.room.active_queue_item_id;
+            delete doc.room.playback_started_at;
+            return;
+        }
 
-    // Calculate next turn
-    let nextTurnIndex = (currentRoom.current_turn_index ?? -1) + 1;
-    const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
-    
-    // Find the next player's pending queue item
-    const nextPlayerQueue = currentRoom.queue_items
-      .filter(q => 
-        q.status === "PENDING" && 
-        (q as any).player?.id === nextPlayerId
-      )
-      .sort((a, b) => a.created_at - b.created_at);
+        // Calculate next turn logic
+        // This logic is slightly complex because we need to find the next player WITH A SONG.
+        // If we just iterate one by one, we might find a player with no songs.
+        // We should check up to N players (where N = count) to find one.
 
-    if (nextPlayerQueue.length > 0) {
-      // Play next player's song
-      const nextItem = nextPlayerQueue[0];
-      txs.push(db.tx.rooms[currentRoom.id].update({
-        current_video_id: nextItem.video_id,
-        current_start_time: nextItem.highlight_start,
-        current_video_offset: nextItem.highlight_start, // Reset offset to start time
-        playback_started_at: Date.now(),
-        active_player_id: nextPlayerId,
-        active_queue_item_id: nextItem.id,
-        player_order: playerOrder,
-        current_turn_index: nextTurnIndex % playerOrder.length,
-      }));
-    } else {
-      // No song in this player's queue - check if anyone else has songs
-      const anyPending = currentRoom.queue_items.some(q => q.status === "PENDING");
-      
-      if (anyPending) {
-        // Skip this player's turn and try next player (recursive call after update)
-        txs.push(db.tx.rooms[currentRoom.id].update({
-          current_video_id: null,
-          active_player_id: nextPlayerId,
-          active_queue_item_id: null,
-          playback_started_at: null,
-          current_video_offset: null,
-          player_order: playerOrder,
-          current_turn_index: nextTurnIndex % playerOrder.length,
-        }));
-      } else {
-        // No pending songs at all
-        txs.push(db.tx.rooms[currentRoom.id].update({
-          current_video_id: null,
-          active_player_id: nextPlayerId,
-          active_queue_item_id: null,
-          playback_started_at: null,
-          current_video_offset: null,
-          player_order: playerOrder,
-          current_turn_index: nextTurnIndex % playerOrder.length,
-        }));
-      }
-    }
-    
-    await db.transact(txs);
+        let nextTurnIndex = (doc.room.current_turn_index ?? -1);
+        let foundSong = false;
+        let attempts = 0;
+
+        while (attempts < playerOrder.length) {
+            nextTurnIndex = (nextTurnIndex + 1);
+            const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
+            
+            // Find song for this player
+            const nextPlayerQueue = Object.values(doc.queue_items)
+                .filter(q => q.status === "PENDING" && q.player_id === nextPlayerId)
+                .sort((a, b) => a.created_at - b.created_at);
+            
+            if (nextPlayerQueue.length > 0) {
+                // Found one!
+                const nextItem = nextPlayerQueue[0];
+                doc.room.current_video_id = nextItem.video_id;
+                doc.room.current_start_time = nextItem.highlight_start;
+                doc.room.current_video_offset = nextItem.highlight_start;
+                doc.room.playback_started_at = Date.now();
+                doc.room.active_player_id = nextPlayerId;
+                doc.room.active_queue_item_id = nextItem.id;
+                doc.room.player_order = playerOrder;
+                doc.room.current_turn_index = nextTurnIndex % playerOrder.length; // Store the normalized index
+                foundSong = true;
+                break;
+            }
+            attempts++;
+        }
+
+        if (!foundSong) {
+            // No songs found for ANY player
+            // Just advance turn to next player anyway to show "Waiting for X"
+             nextTurnIndex = (doc.room.current_turn_index ?? -1) + 1;
+             const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
+
+             delete doc.room.current_video_id;
+             doc.room.active_player_id = nextPlayerId;
+             delete doc.room.active_queue_item_id;
+             delete doc.room.playback_started_at;
+             delete doc.room.current_video_offset;
+             doc.room.player_order = playerOrder;
+             doc.room.current_turn_index = nextTurnIndex % playerOrder.length;
+        }
+    });
     setIsEnding(false);
   };
 
   const endSession = () => {
-    const txs = [];
-    const currentActiveItem = roomRef.current.queue_items.find(q => q.id === roomRef.current.active_player_id);
-    if (currentActiveItem) {
-        txs.push(db.tx.queue_items[currentActiveItem.id].update({ status: "PLAYED" }));
-    }
-    txs.push(db.tx.rooms[room.id].update({ 
-        status: "FINISHED",
-        current_video_id: null,
-        active_player_id: null,
-        playback_started_at: null,
-    }));
-    db.transact(txs);
+    updateState(doc => {
+        const currentActiveItem = doc.queue_items[doc.room.active_queue_item_id || ""];
+        if (currentActiveItem) {
+            currentActiveItem.status = "PLAYED";
+        }
+        doc.room.status = "FINISHED";
+        delete doc.room.current_video_id;
+        delete doc.room.active_player_id;
+        delete doc.room.playback_started_at;
+    });
   };
 
   const updateTimer = (seconds: number) => {
-      db.transact(db.tx.rooms[room.id].update({ timer_duration: seconds }));
+      updateState(doc => doc.room.timer_duration = seconds);
   };
 
   const addTime = (seconds: number) => {
-      if (!room.playback_started_at) return;
-      const newStart = room.playback_started_at + (seconds * 1000);
-      db.transact(db.tx.rooms[room.id].update({ playback_started_at: newStart }));
+      updateState(doc => {
+          if (!doc.room.playback_started_at) return;
+          doc.room.playback_started_at += (seconds * 1000);
+      });
   };
 
   const handleKick = (playerId: string, name: string) => {
@@ -252,14 +222,43 @@ export default function GameView({ room }: GameViewProps) {
 
   const confirmKick = () => {
       if (kickPlayerId) {
-          db.transact(db.tx.players[kickPlayerId].delete());
+          updateState(doc => {
+              delete doc.players[kickPlayerId];
+              // Optional: Clean up their queue items or leave them?
+              // InstantDB cascaded. We should probably clean.
+              // But keeping it simple for now.
+          });
           setKickPlayerId(null);
       }
   };
 
   const handleToggleVIP = (player: any) => {
-      db.transact(db.tx.players[player.id].update({ is_vip: !player.is_vip }));
+      updateState(doc => {
+          if (doc.players[player.id]) {
+              doc.players[player.id].is_vip = !doc.players[player.id].is_vip;
+          }
+      });
   };
+
+  const toggleAutoSkip = () => {
+      updateState(doc => doc.room.auto_skip = doc.room.auto_skip === false);
+  };
+
+  // derived for render
+  const activeQueueItem = state.queue_items[room.active_queue_item_id || ""]; 
+  const activePlayer = state.players[room.active_player_id || ""];
+  
+  // getCurrentTurnPlayer logic for UI
+  const getCurrentTurnPlayer = () => {
+      if (!room.player_order || room.player_order.length === 0) return null;
+      // Filter valid
+      const validOrder = room.player_order.filter(pid => state.players[pid]);
+      if (validOrder.length === 0) return null;
+      const turnIndex = room.current_turn_index ?? 0;
+      const playerId = validOrder[turnIndex % validOrder.length];
+      return state.players[playerId];
+  };
+  const currentTurnPlayer = getCurrentTurnPlayer();
 
   const renderModals = () => (
     <>
@@ -311,7 +310,7 @@ export default function GameView({ room }: GameViewProps) {
                             </p>
                         </div>
                         <button 
-                            onClick={() => db.transact(db.tx.rooms[room.id].update({ auto_skip: room.auto_skip === false }))}
+                            onClick={toggleAutoSkip}
                             className={`relative w-14 h-8 rounded-full transition-colors ${
                                 room.auto_skip !== false 
                                     ? "bg-indigo-500" 
@@ -344,7 +343,7 @@ export default function GameView({ room }: GameViewProps) {
                     <p className="text-neutral-400">{language === "de" ? "Spieler entfernen oder VIP-Status vergeben." : "Kick players or grant VIP status."}</p>
                 </div>
                 <div className="flex-1 overflow-y-auto space-y-3 min-h-0 pr-2">
-                    {room.players.map((player) => (
+                    {players.map((player) => (
                         <div key={player.id} className="flex items-center justify-between bg-neutral-800/50 p-4 rounded-2xl border border-neutral-700/50">
                             <div className="flex items-center space-x-4">
                                 <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm ${player.is_vip ? 'bg-yellow-500 text-black' : 'bg-neutral-700 text-white'}`}>
@@ -386,15 +385,11 @@ export default function GameView({ room }: GameViewProps) {
     </>
   );
 
-  const activeQueueItem = room.queue_items.find(q => q.id === room.active_queue_item_id); 
-  const activePlayer = room.players.find(p => p.id === room.active_player_id);
-  const currentTurnPlayer = getCurrentTurnPlayer();
-
   if (!room.current_video_id) {
     // Show whose turn it is when waiting
     const turnPlayer = currentTurnPlayer;
     const turnPlayerQueue = turnPlayer 
-      ? room.queue_items.filter(q => q.status === "PENDING" && (q as any).player?.id === turnPlayer.id)
+      ? queueItems.filter(q => q.status === "PENDING" && q.player_id === turnPlayer.id)
       : [];
     
     return (
@@ -436,7 +431,7 @@ export default function GameView({ room }: GameViewProps) {
             </div>
             
             {/* Skip turn button when waiting for someone with empty queue */}
-            {turnPlayer && turnPlayerQueue.length === 0 && room.queue_items.some(q => q.status === "PENDING") && (
+            {turnPlayer && turnPlayerQueue.length === 0 && queueItems.some(q => q.status === "PENDING") && (
               <button 
                 onClick={handleNextSong}
                 className="px-6 py-3 bg-neutral-800 hover:bg-neutral-700 rounded-xl font-bold text-sm text-neutral-300 flex items-center space-x-2 transition-colors"
@@ -449,19 +444,19 @@ export default function GameView({ room }: GameViewProps) {
         <div className="flex items-center justify-between px-4 py-4 shrink-0 h-20 border-t border-neutral-900/50">
             <div className="flex items-center space-x-8 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setShowPlayers(true)}>
                 <div className="flex -space-x-3">
-                    {room.players.map((p, i) => (
+                    {players.map((p, i) => (
                         <div key={p.id} className={`w-10 h-10 rounded-full border-2 bg-neutral-800 flex items-center justify-center font-bold text-xs ${
                           p.id === turnPlayer?.id 
                             ? 'border-indigo-500 text-indigo-500 ring-2 ring-indigo-500/50' 
                             : p.is_vip 
                               ? 'border-yellow-500 text-yellow-500' 
                               : 'border-neutral-950 text-white'
-                        }`} style={{ zIndex: room.players.length - i }}>
+                        }`} style={{ zIndex: players.length - i }}>
                             {p.nickname[0].toUpperCase()}
                         </div>
                     ))}
                 </div>
-                <div className="text-neutral-500 text-sm font-medium">{room.players.length} {t("djsOnline")}</div>
+                <div className="text-neutral-500 text-sm font-medium">{players.length} {t("djsOnline")}</div>
             </div>
             <div className="flex items-center space-x-6">
                 <button onClick={() => setShowPlayers(true)} className="p-3 rounded-full bg-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-700 transition-colors" title={t("managePlayers")}>
@@ -548,20 +543,20 @@ export default function GameView({ room }: GameViewProps) {
         {/* Hype Meter Overlay */}
         {activeQueueItem && (
             <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 w-full max-w-xl px-6">
-                <HypeMeter votes={activeQueueItem.votes as any} />
+                <HypeMeter votes={activeQueueItem.votes || {}} />
             </div>
         )}
       </div>
       <div className="flex items-center justify-between px-4 py-4 shrink-0 h-20">
         <div className="flex items-center space-x-8 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setShowPlayers(true)}>
             <div className="flex -space-x-3">
-                {room.players.map((p, i) => (
-                    <div key={p.id} className={`w-10 h-10 rounded-full border-2 bg-neutral-800 flex items-center justify-center font-bold text-xs ${p.is_vip ? 'border-yellow-500 text-yellow-500' : 'border-neutral-950 text-white'}`} style={{ zIndex: room.players.length - i }}>
+                {players.map((p, i) => (
+                    <div key={p.id} className={`w-10 h-10 rounded-full border-2 bg-neutral-800 flex items-center justify-center font-bold text-xs ${p.is_vip ? 'border-yellow-500 text-yellow-500' : 'border-neutral-950 text-white'}`} style={{ zIndex: players.length - i }}>
                         {p.nickname[0].toUpperCase()}
                     </div>
                 ))}
             </div>
-            <div className="text-neutral-500 text-sm font-medium">{room.players.length} {t("djsOnline")}</div>
+            <div className="text-neutral-500 text-sm font-medium">{players.length} {t("djsOnline")}</div>
         </div>
         <div className="flex items-center space-x-6">
             <button onClick={() => setShowPlayers(true)} className="p-3 rounded-full bg-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-700 transition-colors" title={t("managePlayers")}>
