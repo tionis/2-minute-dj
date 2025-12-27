@@ -469,6 +469,7 @@ function PlayContent() {
             {step === "CLIP" && videoData && (
                 <ClipperStep 
                     videoId={videoData.id}
+                    timerDuration={room.timer_duration || 120}
                     onQueue={handleQueue}
                     onBack={() => setStep("SEARCH")}
                 />

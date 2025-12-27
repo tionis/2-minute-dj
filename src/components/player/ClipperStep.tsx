@@ -14,20 +14,24 @@ declare global {
 
 interface ClipperStepProps {
   videoId: string;
+  timerDuration?: number; // Timer duration in seconds (default 120)
   onQueue: (startTime: number) => void;
   onBack: () => void;
 }
 
-export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepProps) {
+export default function ClipperStep({ videoId, timerDuration = 120, onQueue, onBack }: ClipperStepProps) {
   const { t, language } = useI18n();
   const [duration, setDuration] = useState<number>(0); 
   const [startTime, setStartTime] = useState<number>(0);
+  const [currentTime, setCurrentTime] = useState<number>(0);
   const [isReady, setIsReady] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const playerRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Constants
-  const WINDOW_SIZE = 120; // 2 minutes
+  // Use timer duration for window size
+  const windowSize = timerDuration;
 
   // Load YouTube IFrame API and create player
   useEffect(() => {
@@ -62,8 +66,13 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
           onStateChange: (event: any) => {
             // Get duration when video starts playing
             if (event.data === window.YT.PlayerState.PLAYING) {
+              setIsPlaying(true);
               const dur = event.target.getDuration();
               if (dur > 0 && duration === 0) setDuration(dur);
+            } else if (event.data === window.YT.PlayerState.PAUSED) {
+              setIsPlaying(false);
+            } else if (event.data === window.YT.PlayerState.ENDED) {
+              setIsPlaying(false);
             }
           }
         }
@@ -77,12 +86,33 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
     }
 
     return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
       if (playerRef.current?.destroy) {
         playerRef.current.destroy();
         playerRef.current = null;
       }
     };
   }, [videoId]);
+
+  // Track current playback time
+  useEffect(() => {
+    if (isPlaying && playerRef.current?.getCurrentTime) {
+      progressIntervalRef.current = setInterval(() => {
+        const time = playerRef.current.getCurrentTime();
+        setCurrentTime(time);
+      }, 250);
+    } else if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+    }
+
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+    };
+  }, [isPlaying]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -124,6 +154,33 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
         {/* YouTube Player Container */}
         <div ref={containerRef} className="w-full h-full" />
         
+        {/* Progress bar overlay at bottom */}
+        {isReady && duration > 0 && (
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-neutral-800/80">
+            {/* Selected window highlight */}
+            <div 
+              className="absolute h-full bg-indigo-500/40"
+              style={{
+                left: `${(startTime / duration) * 100}%`,
+                width: `${Math.min(100 - (startTime / duration) * 100, (windowSize / duration) * 100)}%`
+              }}
+            />
+            {/* Current playback position */}
+            <div 
+              className="absolute h-full bg-white/80 transition-all duration-100"
+              style={{
+                left: 0,
+                width: `${(currentTime / duration) * 100}%`
+              }}
+            />
+          </div>
+        )}
+        
+        {/* Time display overlay */}
+        <div className="absolute bottom-2 left-2 bg-black/70 px-2 py-1 rounded text-xs font-mono text-white/80 pointer-events-none">
+          {formatTime(currentTime)} / {formatTime(duration)}
+        </div>
+        
         {/* Helper overlay to show it's a preview */}
         <div className="absolute top-2 right-2 bg-black/50 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-widest text-white/50 pointer-events-none">
             Preview
@@ -133,7 +190,7 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
       <div className="space-y-6">
           <div className="flex justify-between text-sm font-mono text-indigo-400 text-left">
             <span>{language === "de" ? "Start" : "Start"}: {formatTime(startTime)}</span>
-            <span>+ 2 min</span>
+            <span>+ {formatTime(windowSize)}</span>
           </div>
 
           <div className="relative pt-6 pb-2">
@@ -144,7 +201,16 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
                         className="absolute h-full bg-indigo-500/30 transition-all duration-75"
                         style={{
                             left: `${(startTime / duration) * 100}%`,
-                            width: `${Math.min(100, (WINDOW_SIZE / duration) * 100)}%`
+                            width: `${Math.min(100 - (startTime / duration) * 100, (windowSize / duration) * 100)}%`
+                        }}
+                    />
+                )}
+                {/* Current playback indicator on slider */}
+                {duration > 0 && (
+                    <div 
+                        className="absolute h-full w-0.5 bg-white/60 transition-all duration-100"
+                        style={{
+                            left: `${(currentTime / duration) * 100}%`
                         }}
                     />
                 )}
@@ -153,7 +219,7 @@ export default function ClipperStep({ videoId, onQueue, onBack }: ClipperStepPro
              <input
                 type="range"
                 min={0}
-                max={duration || 100} // Fallback until duration loads
+                max={Math.max(0, (duration || 100) - windowSize)} // Limit so window doesn't exceed video
                 step={1}
                 value={startTime}
                 onChange={handleSliderChange}
