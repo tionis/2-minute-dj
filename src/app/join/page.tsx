@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 function JoinContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { state, updateState, setRoomId, peerId, isConnected } = useGameStore();
+  const { state, updateState, setRoomId, peerId, isConnected, peers } = useGameStore();
 
   const [code, setCode] = useState("");
   const [nickname, setNickname] = useState("");
@@ -17,6 +17,7 @@ function JoinContent() {
   const [errorMsg, setErrorMsg] = useState("");
   const [hasTriedJoin, setHasTriedJoin] = useState(false);
   const [connectionTimedOut, setConnectionTimedOut] = useState(false);
+  const [waitingForHost, setWaitingForHost] = useState(false);
 
   // Auto-fill code from URL if present
   useEffect(() => {
@@ -32,17 +33,33 @@ function JoinContent() {
           setRoomId(code);
           setHasTriedJoin(true);
           setConnectionTimedOut(false);
+          setWaitingForHost(false);
       } else {
           setRoomId(""); // Disconnect if invalid code
           setHasTriedJoin(false);
           setConnectionTimedOut(false);
+          setWaitingForHost(false);
       }
   }, [code, setRoomId]);
 
+  // Track when we're connected but no peers (waiting for host)
+  useEffect(() => {
+    if (hasTriedJoin && isConnected && peers.length === 0 && state.room.code !== code) {
+      setWaitingForHost(true);
+    } else {
+      setWaitingForHost(false);
+    }
+  }, [hasTriedJoin, isConnected, peers.length, state.room.code, code]);
+
   // Timeout mechanism: if room not found after 15 seconds, show error
   useEffect(() => {
-    if (!hasTriedJoin || !isConnected || state.room.code === code) {
+    if (!hasTriedJoin || !isConnected) {
       return; // No timeout needed
+    }
+    
+    // If we already found the room, no timeout needed
+    if (state.room.code === code) {
+      return;
     }
 
     const timeoutId = setTimeout(() => {
@@ -56,18 +73,20 @@ function JoinContent() {
     return () => clearTimeout(timeoutId);
   }, [hasTriedJoin, isConnected, state.room.code, code]);
 
-  // Check if room is valid based on synced state
-  // We assume if we connected and got state, room.code should match for existing rooms.
-  // If we are alone and first to join, room.code is "" (default), but we can still be connected.
-  const isValidRoom =
-    code.length === 4 &&
-    (state.room.code === code ||
-      (hasTriedJoin && isConnected && !state.room.code && !connectionTimedOut));
+  // Room is only valid if we have peers AND state shows matching room code
+  // This ensures we actually connected to a host, not just an empty room
+  const hasHost = peers.length > 0;
+  const roomStateMatches = state.room.code === code;
+  const isValidRoom = code.length === 4 && roomStateMatches && hasHost;
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isValidRoom) {
-      setErrorMsg("Room not found. Check the code on the TV.");
+      if (waitingForHost || (isConnected && !hasHost)) {
+        setErrorMsg("No host found. Make sure the TV is showing this room code.");
+      } else {
+        setErrorMsg("Room not found. Check the code on the TV.");
+      }
       return;
     }
     if (!nickname.trim()) {
@@ -133,24 +152,38 @@ function JoinContent() {
               placeholder="ABCD"
               className={cn(
                 "w-full bg-neutral-800 border-2 border-transparent focus:border-indigo-500 rounded-xl p-4 text-center text-3xl font-mono tracking-[0.5em] uppercase outline-none transition-all placeholder:tracking-normal placeholder:font-sans placeholder:text-neutral-600",
-                code.length === 4 && !isValidRoom && hasTriedJoin && isConnected && !connectionTimedOut && "border-yellow-500/50",
+                code.length === 4 && !isValidRoom && hasTriedJoin && isConnected && !connectionTimedOut && !waitingForHost && "border-yellow-500/50",
+                code.length === 4 && waitingForHost && !connectionTimedOut && "border-orange-500/50",
                 code.length === 4 && connectionTimedOut && "border-red-500/50",
                 isValidRoom && "border-green-500/50"
               )}
             />
-            {code.length === 4 && !isValidRoom && isConnected && !connectionTimedOut && (
+            {/* Searching state - just connected, looking for peers */}
+            {code.length === 4 && !isValidRoom && isConnected && !connectionTimedOut && !waitingForHost && !roomStateMatches && (
               <p className="text-yellow-400 text-xs text-center animate-in fade-in flex items-center justify-center gap-2">
                 <Loader2 className="animate-spin" size={12} />
-                Searching for room...
+                Connecting to room...
               </p>
             )}
+            {/* Waiting for host - connected to room but no peers yet */}
+            {code.length === 4 && waitingForHost && !connectionTimedOut && (
+              <p className="text-orange-400 text-xs text-center animate-in fade-in flex items-center justify-center gap-2">
+                <Loader2 className="animate-spin" size={12} />
+                Waiting for host... Make sure the TV is showing this code.
+              </p>
+            )}
+            {/* Timeout - no host found after waiting */}
             {connectionTimedOut && (
               <p className="text-red-400 text-xs text-center animate-in fade-in">
-                Room not found. Make sure the TV is showing the room code.
+                No host found. Make sure the TV is showing this room code.
               </p>
             )}
+            {/* Success - found room and host */}
             {isValidRoom && (
-              <p className="text-green-400 text-xs text-center animate-in fade-in">Room found!</p>
+              <p className="text-green-400 text-xs text-center animate-in fade-in flex items-center justify-center gap-2">
+                <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                Connected to host!
+              </p>
             )}
           </div>
 
