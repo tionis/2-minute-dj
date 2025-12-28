@@ -16,6 +16,7 @@ function JoinContent() {
   const [isJoining, setIsJoining] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [hasTriedJoin, setHasTriedJoin] = useState(false);
+  const [connectionTimedOut, setConnectionTimedOut] = useState(false);
 
   // Auto-fill code from URL if present
   useEffect(() => {
@@ -30,11 +31,30 @@ function JoinContent() {
       if (code.length === 4) {
           setRoomId(code);
           setHasTriedJoin(true);
+          setConnectionTimedOut(false);
       } else {
           setRoomId(""); // Disconnect if invalid code
           setHasTriedJoin(false);
+          setConnectionTimedOut(false);
       }
   }, [code, setRoomId]);
+
+  // Timeout mechanism: if room not found after 15 seconds, show error
+  useEffect(() => {
+    if (!hasTriedJoin || !isConnected || state.room.code === code) {
+      return; // No timeout needed
+    }
+
+    const timeoutId = setTimeout(() => {
+      // If we're still connected but haven't received room data matching our code,
+      // the room likely doesn't exist (no host peer in that room)
+      if (state.room.code !== code) {
+        setConnectionTimedOut(true);
+      }
+    }, 15000); // 15 second timeout
+
+    return () => clearTimeout(timeoutId);
+  }, [hasTriedJoin, isConnected, state.room.code, code]);
 
   // Check if room is valid based on synced state
   // We assume if we connected and got state, room.code should match for existing rooms.
@@ -42,7 +62,7 @@ function JoinContent() {
   const isValidRoom =
     code.length === 4 &&
     (state.room.code === code ||
-      (hasTriedJoin && isConnected && !state.room.code));
+      (hasTriedJoin && isConnected && !state.room.code && !connectionTimedOut));
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,12 +133,21 @@ function JoinContent() {
               placeholder="ABCD"
               className={cn(
                 "w-full bg-neutral-800 border-2 border-transparent focus:border-indigo-500 rounded-xl p-4 text-center text-3xl font-mono tracking-[0.5em] uppercase outline-none transition-all placeholder:tracking-normal placeholder:font-sans placeholder:text-neutral-600",
-                code.length === 4 && !isValidRoom && hasTriedJoin && isConnected && "border-red-500/50",
+                code.length === 4 && !isValidRoom && hasTriedJoin && isConnected && !connectionTimedOut && "border-yellow-500/50",
+                code.length === 4 && connectionTimedOut && "border-red-500/50",
                 isValidRoom && "border-green-500/50"
               )}
             />
-            {code.length === 4 && !isValidRoom && isConnected && (
-              <p className="text-red-400 text-xs text-center animate-in fade-in">Searching for room...</p>
+            {code.length === 4 && !isValidRoom && isConnected && !connectionTimedOut && (
+              <p className="text-yellow-400 text-xs text-center animate-in fade-in flex items-center justify-center gap-2">
+                <Loader2 className="animate-spin" size={12} />
+                Searching for room...
+              </p>
+            )}
+            {connectionTimedOut && (
+              <p className="text-red-400 text-xs text-center animate-in fade-in">
+                Room not found. Make sure the TV is showing the room code.
+              </p>
             )}
             {isValidRoom && (
               <p className="text-green-400 text-xs text-center animate-in fade-in">Room found!</p>

@@ -18,6 +18,27 @@ const initialState: GameState = {
   queue_items: {},
 };
 
+// Helper functions for safe base64 encoding/decoding of binary data
+// Using chunked approach to avoid stack overflow with large arrays
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  const CHUNK_SIZE = 0x8000; // 32KB chunks to avoid stack overflow
+  const chunks: string[] = [];
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    const chunk = bytes.subarray(i, i + CHUNK_SIZE);
+    chunks.push(String.fromCharCode(...chunk));
+  }
+  return btoa(chunks.join(''));
+}
+
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
 export function GameProvider({ children }: { children: React.ReactNode }) {
   const [roomId, setRoomId] = useState<string | null>(null);
   const [peers, setPeers] = useState<string[]>([]);
@@ -33,28 +54,37 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const roomRef = useRef<TrysteroRoom | null>(null);
   const sendSyncRef = useRef<((data: Uint8Array, target: string) => void) | null>(null);
 
+  // Refs for functions used in useEffect to avoid dependency issues
+  // This prevents unnecessary room reconnections when callbacks change
+  const updateDocRef = useRef<(newDoc: Automerge.Doc<GameState>) => void>(() => {});
+  const syncWithPeerRef = useRef<(targetPeerId: string) => void>(() => {});
+
   // Helper to update doc and trigger React re-render
   const updateDoc = useCallback((newDoc: Automerge.Doc<GameState>) => {
     docRef.current = newDoc;
     setDocState(newDoc);
     
-    // Persist to localStorage
+    // Persist to localStorage using safe base64 conversion
     try {
         const bytes = Automerge.save(newDoc);
-        // We need to store it as a string. Base64 is better than JSON array.
-        const base64 = btoa(String.fromCharCode(...bytes));
+        const base64 = uint8ArrayToBase64(bytes);
         localStorage.setItem('2mdj_doc_backup', base64);
     } catch (e) {
         console.error("Failed to save state", e);
     }
   }, []);
 
+  // Keep ref in sync with latest callback
+  useEffect(() => {
+    updateDocRef.current = updateDoc;
+  }, [updateDoc]);
+
   // Load initial state
   useEffect(() => {
       const saved = localStorage.getItem('2mdj_doc_backup');
       if (saved) {
           try {
-              const binary = Uint8Array.from(atob(saved), c => c.charCodeAt(0));
+              const binary = base64ToUint8Array(saved);
               const loadedDoc = Automerge.load<GameState>(binary);
               docRef.current = loadedDoc;
               setDocState(loadedDoc);
@@ -76,19 +106,25 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     
     const [nextSyncState, message] = Automerge.generateSyncMessage(currentDoc, currentSyncState);
     
-    updateSyncState(targetPeerId, nextSyncState);
+    syncStatesRef.current[targetPeerId] = nextSyncState;
     
     if (message && sendSyncRef.current) {
       sendSyncRef.current(message, targetPeerId);
     }
-  }, [updateSyncState]);
+  }, []);
+
+  // Keep ref in sync with latest callback
+  useEffect(() => {
+    syncWithPeerRef.current = syncWithPeer;
+  }, [syncWithPeer]);
 
   // Broadcast changes to all peers
   const broadcastChanges = useCallback(() => {
-    peers.forEach(p => syncWithPeer(p));
-  }, [peers, syncWithPeer]);
+    peers.forEach(p => syncWithPeerRef.current(p));
+  }, [peers]);
 
   // Initialize Room when roomId changes
+  // Uses refs for callbacks to avoid reconnection on callback changes
   useEffect(() => {
     if (!roomId) {
       if (roomRef.current) {
@@ -112,7 +148,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       console.log('Peer joined:', joinedPeerId);
       setPeers(prev => [...prev, joinedPeerId]);
       syncStatesRef.current[joinedPeerId] = Automerge.initSyncState();
-      syncWithPeer(joinedPeerId);
+      // Use ref to get latest syncWithPeer without causing effect re-runs
+      syncWithPeerRef.current(joinedPeerId);
     });
 
     // Handle Peer Leave
@@ -129,11 +166,12 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       const [newDoc, newSyncState] = Automerge.receiveSyncMessage(currentDoc, currentSyncState, data);
 
-      updateDoc(newDoc);
-      updateSyncState(senderPeerId, newSyncState);
+      // Use refs to get latest functions without causing effect re-runs
+      updateDocRef.current(newDoc);
+      syncStatesRef.current[senderPeerId] = newSyncState;
       
       // Reply if needed (sync protocol is a conversation)
-      syncWithPeer(senderPeerId);
+      syncWithPeerRef.current(senderPeerId);
     });
 
     setIsConnected(true);
@@ -143,7 +181,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       roomRef.current = null;
       setIsConnected(false);
     };
-  }, [roomId, updateDoc, updateSyncState, syncWithPeer]);
+  }, [roomId]); // Only re-run when roomId changes
 
   // Public API to update state
   const updateState = useCallback((callback: (doc: GameState) => void) => {
