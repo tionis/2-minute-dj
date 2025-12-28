@@ -361,6 +361,32 @@ function PlayContent() {
                 </button>
               </div>
 
+              {/* Allow Self Voting Toggle */}
+              <div className="flex items-center justify-between pt-3 border-t border-neutral-800">
+                <div className="flex flex-col">
+                    <span className="text-xs font-bold text-neutral-300">
+                        {language === "de" ? "Eigene Songs bewerten" : "Self-Voting"}
+                    </span>
+                    <span className="text-[10px] text-neutral-500">
+                        {language === "de" ? "Erlaubt DJs für ihre eigenen Songs zu stimmen" : "Allow DJs to vote for their own songs"}
+                    </span>
+                </div>
+                <button 
+                    onClick={() => updateState(doc => doc.room.allow_self_voting = !doc.room.allow_self_voting)}
+                    className={`relative w-12 h-6 rounded-full transition-colors ${
+                        room.allow_self_voting 
+                            ? "bg-indigo-500" 
+                            : "bg-neutral-700"
+                    }`}
+                >
+                    <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                        room.allow_self_voting 
+                            ? "translate-x-6" 
+                            : "translate-x-0.5"
+                    }`} />
+                </button>
+              </div>
+
               {/* Start Button */}
               <button 
                 onClick={handleStartParty}

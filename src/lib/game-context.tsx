@@ -10,6 +10,7 @@ export interface StoreContextType {
   resetState: () => void;
   roomId: string | null;
   setRoomId: (id: string) => void;
+  setHostMode: (isHost: boolean) => void;
   peerId: string;
   peers: string[];
   isConnected: boolean;

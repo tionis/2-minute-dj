@@ -45,6 +45,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [peerId, setPeerId] = useState<string>("");
 
+  // Host Mode Persistence
+  const isHostRef = useRef(false);
+
   // Automerge State
   const docRef = useRef<Automerge.Doc<GameState>>(Automerge.from(initialState as unknown as Record<string, unknown>) as Automerge.Doc<GameState>);
   const [docState, setDocState] = useState<Automerge.Doc<GameState>>(docRef.current);
@@ -64,13 +67,15 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     docRef.current = newDoc;
     setDocState(newDoc);
     
-    // Persist to localStorage using safe base64 conversion
-    try {
-        const bytes = Automerge.save(newDoc);
-        const base64 = uint8ArrayToBase64(bytes);
-        localStorage.setItem('2mdj_doc_backup', base64);
-    } catch (e) {
-        console.error("Failed to save state", e);
+    // Persist to localStorage only if Host
+    if (isHostRef.current) {
+        try {
+            const bytes = Automerge.save(newDoc);
+            const base64 = uint8ArrayToBase64(bytes);
+            localStorage.setItem('2mdj_doc_backup', base64);
+        } catch (e) {
+            console.error("Failed to save state", e);
+        }
     }
   }, []);
 
@@ -79,20 +84,44 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     updateDocRef.current = updateDoc;
   }, [updateDoc]);
 
-  // Load initial state
+  // Load initial state ONLY if we were previously a host
   useEffect(() => {
-      const saved = localStorage.getItem('2mdj_doc_backup');
-      if (saved) {
-          try {
-              const binary = base64ToUint8Array(saved);
-              const loadedDoc = Automerge.load<GameState>(binary);
-              docRef.current = loadedDoc;
-              setDocState(loadedDoc);
-          } catch (e) {
-              console.error("Failed to load state", e);
+      const isHost = localStorage.getItem('2mdj_is_host') === 'true';
+      isHostRef.current = isHost;
+
+      if (isHost) {
+          const saved = localStorage.getItem('2mdj_doc_backup');
+          if (saved) {
+              try {
+                  const binary = base64ToUint8Array(saved);
+                  const loadedDoc = Automerge.load<GameState>(binary);
+                  docRef.current = loadedDoc;
+                  setDocState(loadedDoc);
+              } catch (e) {
+                  console.error("Failed to load state", e);
+              }
           }
+      } else {
+          // If we are not host, ensure we don't have lingering backup
+          // (Though we just ignore it, cleaning it up is nice but optional. 
+          //  We won't delete it here to avoid accidental data loss if logic is wrong,
+          //  but we won't load it.)
       }
   }, []);
+
+  const setHostMode = useCallback((isHost: boolean) => {
+      isHostRef.current = isHost;
+      if (isHost) {
+          localStorage.setItem('2mdj_is_host', 'true');
+          // Trigger a save immediately
+          updateDoc(docRef.current);
+      } else {
+          localStorage.setItem('2mdj_is_host', 'false');
+          localStorage.removeItem('2mdj_doc_backup');
+          // Note: We don't reset state here, just persistence. 
+          // If a user switches from Host to Join, the page navigation/logic should handle state reset if needed.
+      }
+  }, [updateDoc]);
 
   // Update sync state for a peer
   const updateSyncState = useCallback((targetPeerId: string, newSyncState: Automerge.SyncState) => {
@@ -223,6 +252,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       resetState,
       roomId, 
       setRoomId, 
+      setHostMode,
       peerId,
       peers,
       isConnected

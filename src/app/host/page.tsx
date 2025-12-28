@@ -12,7 +12,7 @@ import { useI18n } from "@/components/LanguageProvider";
 
 export default function HostPage() {
   const { t, language, setLanguage } = useI18n();
-  const { state, updateState, resetState, roomId, setRoomId } = useGameStore();
+  const { state, updateState, resetState, roomId, setRoomId, setHostMode } = useGameStore();
   
   const [origin, setOrigin] = useState("");
   const [showQuitModal, setShowQuitModal] = useState(false);
@@ -59,6 +59,7 @@ export default function HostPage() {
         if (roomId !== savedRoomId) {
             setRoomId(savedRoomId);
         }
+        setHostMode(true);
 
         // If we have credentials but state is empty (migration or cleared cache),
         // re-initialize the room state so we don't get stuck loading.
@@ -87,6 +88,7 @@ export default function HostPage() {
     localStorage.setItem("2mdj_host_roomCode", code);
 
     setRoomId(newRoomId);
+    setHostMode(true);
 
     // Reset state to ensure we don't carry over history from previous sessions
     resetState();
@@ -102,7 +104,7 @@ export default function HostPage() {
         doc.players = {};
         doc.queue_items = {};
     });
-  }, [roomId, setRoomId, updateState, resetState]);
+  }, [roomId, setRoomId, updateState, resetState, setHostMode]);
 
   const handleQuitConfirm = () => {
       localStorage.removeItem("2mdj_host_roomId");
