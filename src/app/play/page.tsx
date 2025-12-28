@@ -3,7 +3,7 @@
 import { useGameStore } from "@/lib/game-context";
 import { useSearchParams } from "next/navigation";
 import { Loader2, Music4, Radio, Languages, Clock, Crown, Play, SkipForward } from "lucide-react";
-import { Suspense, useState, useEffect } from "react";
+import { Suspense, useState, useEffect, useRef } from "react";
 import SearchStep from "@/components/player/SearchStep";
 import ClipperStep from "@/components/player/ClipperStep";
 import SuccessStep from "@/components/player/SuccessStep";
@@ -14,6 +14,7 @@ import VIPControls from "@/components/player/VIPControls";
 import { Slider } from "@/components/ui/slider";
 import SummaryView from "@/components/host/SummaryView";
 import { useI18n } from "@/components/LanguageProvider";
+import { saveSession, SessionSong } from "@/lib/session-history";
 
 function PlayContent() {
   const { t, language, setLanguage } = useI18n();
@@ -127,8 +128,78 @@ function PlayContent() {
     setLocalPrevVote(50); 
   }, [previousQueueItem?.id]);
 
+  // Track if we've already saved this session to prevent duplicates
+  const sessionSavedRef = useRef(false);
+
+  // Save session to history when game ends (player view)
+  useEffect(() => {
+    if (room.status === "FINISHED" && !sessionSavedRef.current && room.code) {
+      sessionSavedRef.current = true;
+      
+      const songs: SessionSong[] = Object.values(state.queue_items)
+        .filter(q => q.status === "PLAYED" || q.status === "SKIPPED")
+        .sort((a, b) => a.created_at - b.created_at)
+        .map(q => ({
+          id: q.id,
+          video_id: q.video_id,
+          video_title: q.video_title || "Unknown Track",
+          player_nickname: state.players[q.player_id]?.nickname || "Unknown",
+          votes: q.votes ? Object.values(q.votes) : [],
+          status: q.status as "PLAYED" | "SKIPPED",
+        }));
+
+      saveSession({
+        roomCode: room.code,
+        songs,
+        playerCount: Object.keys(state.players).length,
+        endedAt: Date.now(),
+        role: "player",
+      });
+    }
+    
+    // Reset the ref when status changes away from FINISHED
+    if (room.status !== "FINISHED") {
+      sessionSavedRef.current = false;
+    }
+  }, [room.status, room.code, state.queue_items, state.players]);
+
   if (!roomId || !peerId) {
-    return <div className="text-white p-8">Missing parameters. Please join again.</div>;
+    return (
+      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-white p-6">
+        <div className="max-w-sm w-full text-center space-y-6">
+          <div className="inline-block p-5 rounded-full bg-red-500/10 border border-red-500/30">
+            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-500">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold">{language === "de" ? "Parameter fehlen" : "Missing Parameters"}</h2>
+            <p className="text-neutral-500 text-sm">
+              {language === "de" 
+                ? "Die Verbindung wurde unterbrochen. Bitte tritt der Session erneut bei."
+                : "The connection was lost. Please rejoin the session."}
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <a 
+              href="/"
+              className="px-6 py-3 rounded-xl bg-neutral-800 text-white font-medium hover:bg-neutral-700 transition-colors flex items-center justify-center space-x-2"
+            >
+              <Home size={18} />
+              <span>{language === "de" ? "Startseite" : "Home"}</span>
+            </a>
+            <a 
+              href="/join"
+              className="px-6 py-3 rounded-xl bg-indigo-500 text-white font-medium hover:bg-indigo-600 transition-colors flex items-center justify-center space-x-2"
+            >
+              <span>{language === "de" ? "Neu beitreten" : "Rejoin"}</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // We don't have explicit loading state for "query", but we can check if room code is synced
@@ -142,9 +213,49 @@ function PlayContent() {
   }
 
   if (!player) {
-    // Player not found in state (maybe kicked or state lost)
-    // We could redirect to join?
-    return <div className="text-white p-8">Player not found in room. You may have been kicked or the room was closed.</div>;
+    return (
+      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-white p-6">
+        <div className="max-w-sm w-full text-center space-y-6">
+          <div className="inline-block p-5 rounded-full bg-yellow-500/10 border border-yellow-500/30">
+            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-yellow-500">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold">{language === "de" ? "Nicht mehr in der Session" : "No Longer in Session"}</h2>
+            <p className="text-neutral-500 text-sm">
+              {language === "de" 
+                ? "Du wurdest möglicherweise entfernt oder die Session wurde beendet."
+                : "You may have been removed or the session has ended."}
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <a 
+              href="/"
+              className="px-6 py-3 rounded-xl bg-neutral-800 text-white font-medium hover:bg-neutral-700 transition-colors flex items-center justify-center space-x-2"
+            >
+              <Home size={18} />
+              <span>{language === "de" ? "Startseite" : "Home"}</span>
+            </a>
+            <button 
+              onClick={() => {
+                if (urlRoomId) {
+                  setRoomId(urlRoomId);
+                  window.location.reload();
+                } else {
+                  window.location.href = "/join";
+                }
+              }}
+              className="px-6 py-3 rounded-xl bg-indigo-500 text-white font-medium hover:bg-indigo-600 transition-colors flex items-center justify-center space-x-2"
+            >
+              <span>{language === "de" ? "Erneut beitreten" : "Try Rejoining"}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const commitVote = () => {

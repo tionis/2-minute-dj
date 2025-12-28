@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useGameStore } from "@/lib/game-context";
 import { generateRoomCode } from "@/lib/utils";
 import { Copy, Users, Play, Loader2, X, Crown, LogOut, Languages, Clock, SkipForward } from "lucide-react";
@@ -9,10 +9,11 @@ import SummaryView from "@/components/host/SummaryView";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { QRCodeSVG } from "qrcode.react";
 import { useI18n } from "@/components/LanguageProvider";
+import { saveSession, SessionSong } from "@/lib/session-history";
 
 export default function HostPage() {
   const { t, language, setLanguage } = useI18n();
-  const { state, updateState, resetState, roomId, setRoomId, setHostMode } = useGameStore();
+  const { state, updateState, roomId, setRoomId } = useGameStore();
   
   const [origin, setOrigin] = useState("");
   const [showQuitModal, setShowQuitModal] = useState(false);
@@ -59,7 +60,6 @@ export default function HostPage() {
         if (roomId !== savedRoomId) {
             setRoomId(savedRoomId);
         }
-        setHostMode(true);
 
         // If we have credentials but state is empty (migration or cleared cache),
         // re-initialize the room state so we don't get stuck loading.
@@ -88,10 +88,6 @@ export default function HostPage() {
     localStorage.setItem("2mdj_host_roomCode", code);
 
     setRoomId(newRoomId);
-    setHostMode(true);
-
-    // Reset state to ensure we don't carry over history from previous sessions
-    resetState();
 
     // Initialize state
     updateState(doc => {
@@ -104,7 +100,42 @@ export default function HostPage() {
         doc.players = {};
         doc.queue_items = {};
     });
-  }, [roomId, setRoomId, updateState, resetState, setHostMode]);
+  }, [roomId, setRoomId, updateState]);
+
+  // Track if we've already saved this session to prevent duplicates
+  const sessionSavedRef = useRef(false);
+
+  // Save session to history when game ends
+  useEffect(() => {
+    if (room.status === "FINISHED" && !sessionSavedRef.current && room.code) {
+      sessionSavedRef.current = true;
+      
+      const songs: SessionSong[] = Object.values(state.queue_items)
+        .filter(q => q.status === "PLAYED" || q.status === "SKIPPED")
+        .sort((a, b) => a.created_at - b.created_at)
+        .map(q => ({
+          id: q.id,
+          video_id: q.video_id,
+          video_title: q.video_title || "Unknown Track",
+          player_nickname: state.players[q.player_id]?.nickname || "Unknown",
+          votes: q.votes ? Object.values(q.votes) : [],
+          status: q.status as "PLAYED" | "SKIPPED",
+        }));
+
+      saveSession({
+        roomCode: room.code,
+        songs,
+        playerCount: Object.keys(state.players).length,
+        endedAt: Date.now(),
+        role: "host",
+      });
+    }
+    
+    // Reset the ref when status changes away from FINISHED
+    if (room.status !== "FINISHED") {
+      sessionSavedRef.current = false;
+    }
+  }, [room.status, room.code, state.queue_items, state.players]);
 
   const handleQuitConfirm = () => {
       localStorage.removeItem("2mdj_host_roomId");
@@ -172,13 +203,6 @@ export default function HostPage() {
             </div>
             {renderLangSwitcher()}
         </div>
-        
-        {/* Room Code Overlay */}
-        <div className="absolute top-6 right-6 z-50 flex flex-col items-end opacity-50 hover:opacity-100 transition-opacity select-none cursor-default group">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-400 group-hover:text-neutral-300 transition-colors">{t("roomCode")}</span>
-            <span className="text-3xl font-black text-white tracking-widest leading-none font-mono group-hover:scale-110 transition-transform origin-right">{room.code}</span>
-        </div>
-
         <div className="w-full max-w-7xl h-full flex flex-col justify-center">
             {/* We pass the room state to GameView, but GameView also uses store internally now */}
             <GameView />
@@ -327,34 +351,6 @@ export default function HostPage() {
                     >
                         <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
                             room?.auto_skip !== false 
-                                ? "translate-x-6" 
-                                : "translate-x-0.5"
-                        }`} />
-                    </button>
-                </div>
-
-                {/* Allow Self Voting Toggle */}
-                <div className="flex items-center justify-between pt-2 border-t border-neutral-800">
-                    <div className="flex items-center space-x-2">
-                        <div className="flex flex-col">
-                            <span className="text-xs font-bold text-neutral-300">
-                                {language === "de" ? "Eigene Songs bewerten" : "Self-Voting"}
-                            </span>
-                            <span className="text-[10px] text-neutral-500">
-                                {language === "de" ? "Erlaubt DJs für ihre eigenen Songs zu stimmen" : "Allow DJs to vote for their own songs"}
-                            </span>
-                        </div>
-                    </div>
-                    <button 
-                        onClick={() => updateState(doc => doc.room.allow_self_voting = !doc.room.allow_self_voting)}
-                        className={`relative w-12 h-6 rounded-full transition-colors ${
-                            room?.allow_self_voting 
-                                ? "bg-indigo-500" 
-                                : "bg-neutral-700"
-                        }`}
-                    >
-                        <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
-                            room?.allow_self_voting 
                                 ? "translate-x-6" 
                                 : "translate-x-0.5"
                         }`} />

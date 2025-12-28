@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Disc, Smartphone, Monitor, Languages } from "lucide-react";
+import { Disc, Smartphone, Monitor, Languages, History } from "lucide-react";
 import { useI18n } from "@/components/LanguageProvider";
 
 export default function Home() {
@@ -72,6 +72,22 @@ export default function Home() {
               </div>
             </div>
             <div className="text-neutral-600 group-hover:text-purple-400 transition-colors">→</div>
+          </Link>
+
+          <Link
+            href="/history"
+            className="group w-full flex items-center justify-between p-4 rounded-xl bg-neutral-900/50 border border-neutral-800/50 hover:border-neutral-700 hover:bg-neutral-900 transition-all duration-300"
+          >
+            <div className="flex items-center space-x-3">
+              <div className="p-2 rounded-full bg-neutral-800 group-hover:bg-neutral-700 transition-colors">
+                <History size={18} className="text-neutral-400" />
+              </div>
+              <div className="text-left">
+                <h3 className="font-medium text-sm text-neutral-300">{language === "de" ? "Session-Verlauf" : "Session History"}</h3>
+                <p className="text-neutral-600 text-xs">{language === "de" ? "Vergangene Sessions ansehen" : "View past sessions"}</p>
+              </div>
+            </div>
+            <div className="text-neutral-700 group-hover:text-neutral-500 transition-colors">→</div>
           </Link>
         </div>
       </div>
