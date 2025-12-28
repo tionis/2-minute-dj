@@ -80,7 +80,7 @@ export default function Home() {
         {t("poweredBy")}
         <a href="https://automerge.org/" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-400 transition-colors">Automerge</a>
         {" + "}
-        <a href="https://trystero.nostr1.com/" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-400 transition-colors">Trystero</a>
+        <a href="https://oxism.com/trystero/" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-400 transition-colors">Trystero</a>
       </div>
     </div>
   );
