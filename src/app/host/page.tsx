@@ -170,6 +170,13 @@ export default function HostPage() {
             </div>
             {renderLangSwitcher()}
         </div>
+        
+        {/* Room Code Overlay */}
+        <div className="absolute top-6 right-6 z-50 flex flex-col items-end opacity-50 hover:opacity-100 transition-opacity select-none cursor-default group">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-400 group-hover:text-neutral-300 transition-colors">{t("roomCode")}</span>
+            <span className="text-3xl font-black text-white tracking-widest leading-none font-mono group-hover:scale-110 transition-transform origin-right">{room.code}</span>
+        </div>
+
         <div className="w-full max-w-7xl h-full flex flex-col justify-center">
             {/* We pass the room state to GameView, but GameView also uses store internally now */}
             <GameView />
