@@ -6,6 +6,7 @@ import { Loader2, Music, User, SkipForward, Clock, Play, Settings, X, Crown, Pau
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useI18n } from "@/components/LanguageProvider";
 import HypeMeter from "./HypeMeter";
+import { advanceToNextSong, getPlayerOrder } from "@/lib/utils";
 
 export default function GameView() {
   const { t, language } = useI18n();
@@ -102,72 +103,9 @@ export default function GameView() {
     }
   };
 
-  // Get or initialize player order
-  const getPlayerOrder = (currentPlayers: typeof players, currentOrder?: string[]): string[] => {
-    if (currentOrder && Array.isArray(currentOrder)) {
-      const validPlayers = currentOrder.filter(
-        pid => currentPlayers.some(p => p.id === pid)
-      );
-      const newPlayers = currentPlayers
-        .filter(p => !validPlayers.includes(p.id))
-        .sort((a, b) => a.joined_at - b.joined_at)
-        .map(p => p.id);
-      return [...validPlayers, ...newPlayers];
-    }
-    return currentPlayers
-      .sort((a, b) => a.joined_at - b.joined_at)
-      .map(p => p.id);
-  };
-
   const handleNextSong = () => {
     updateState(doc => {
-        const currentActiveItem = doc.queue_items[doc.room.active_queue_item_id || ""];
-
-        // Mark played and save as previous
-        if (currentActiveItem) {
-            currentActiveItem.status = "PLAYED";
-            doc.room.previous_queue_item_id = currentActiveItem.id;
-        }
-
-        const currentPlayers = Object.values(doc.players);
-        const playerOrder = getPlayerOrder(currentPlayers, doc.room.player_order);
-
-        if (playerOrder.length === 0) {
-            delete doc.room.current_video_id;
-            delete doc.room.active_player_id;
-            delete doc.room.active_queue_item_id;
-            delete doc.room.playback_started_at;
-            return;
-        }
-
-        // Strict Round Robin: Just pick the next player, regardless of whether they have a song.
-        let nextTurnIndex = (doc.room.current_turn_index ?? -1) + 1;
-        const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
-        
-        // Check if they have a song
-        const nextPlayerQueue = Object.values(doc.queue_items)
-            .filter(q => q.status === "PENDING" && q.player_id === nextPlayerId)
-            .sort((a, b) => a.created_at - b.created_at);
-        
-        doc.room.player_order = playerOrder;
-        doc.room.current_turn_index = nextTurnIndex % playerOrder.length;
-        doc.room.active_player_id = nextPlayerId;
-
-        if (nextPlayerQueue.length > 0) {
-            // Found one!
-            const nextItem = nextPlayerQueue[0];
-            doc.room.current_video_id = nextItem.video_id;
-            doc.room.current_start_time = nextItem.highlight_start;
-            doc.room.current_video_offset = nextItem.highlight_start;
-            doc.room.playback_started_at = Date.now();
-            doc.room.active_queue_item_id = nextItem.id;
-        } else {
-            // No song, but it's their turn (Waiting state)
-            delete doc.room.current_video_id;
-            delete doc.room.active_queue_item_id;
-            delete doc.room.playback_started_at;
-            delete doc.room.current_video_offset;
-        }
+      advanceToNextSong(doc);
     });
     setIsEnding(false);
   };
@@ -234,20 +172,6 @@ export default function GameView() {
   const activeQueueItem = state.queue_items[room.active_queue_item_id || ""]; 
   const activePlayer = state.players[room.active_player_id || ""];
   
-  // Calculate ordered players for UI
-  const orderedPlayerIds = getPlayerOrder(players, room.player_order);
-  const activeIndex = room.current_turn_index ?? 0;
-  
-  // Rotate list so current player is first
-  const queueDisplay = [
-    ...orderedPlayerIds.slice(activeIndex % orderedPlayerIds.length),
-    ...orderedPlayerIds.slice(0, activeIndex % orderedPlayerIds.length)
-  ].map(id => state.players[id]).filter(Boolean);
-
-  // Limit display to 6 players to avoid crowding
-  const visibleQueue = queueDisplay.slice(0, 6);
-  const hiddenCount = queueDisplay.length - 6;
-
   // getCurrentTurnPlayer logic for UI
   const getCurrentTurnPlayer = () => {
       if (!room.player_order || room.player_order.length === 0) return null;
@@ -319,34 +243,6 @@ export default function GameView() {
                         >
                             <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-transform ${
                                 room.auto_skip !== false 
-                                    ? "translate-x-7" 
-                                    : "translate-x-1"
-                            }`} />
-                        </button>
-                    </div>
-                    
-                    {/* Allow Self Voting Toggle */}
-                    <div className="flex items-center justify-between pt-4 border-t border-neutral-800">
-                        <div className="flex items-center space-x-2">
-                            <div className="flex flex-col">
-                                <span className="text-xs font-bold text-neutral-300">
-                                    {language === "de" ? "Eigene Songs bewerten" : "Self-Voting"}
-                                </span>
-                                <span className="text-[10px] text-neutral-500">
-                                    {language === "de" ? "Erlaubt DJs für ihre eigenen Songs zu stimmen" : "Allow DJs to vote for their own songs"}
-                                </span>
-                            </div>
-                        </div>
-                        <button 
-                            onClick={() => updateState(doc => doc.room.allow_self_voting = !doc.room.allow_self_voting)}
-                            className={`relative w-14 h-8 rounded-full transition-colors ${
-                                room.allow_self_voting 
-                                    ? "bg-indigo-500" 
-                                    : "bg-neutral-700"
-                            }`}
-                        >
-                            <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-transform ${
-                                room.allow_self_voting 
                                     ? "translate-x-7" 
                                     : "translate-x-1"
                             }`} />
@@ -470,35 +366,22 @@ export default function GameView() {
             )}
         </div>
         <div className="flex items-center justify-between px-4 py-4 shrink-0 h-20 border-t border-neutral-900/50">
-            {/* Queue Visualization (Waiting State) */}
-            <div className="flex items-center space-x-4 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setShowPlayers(true)}>
-                <div className="flex items-center space-x-2">
-                  {visibleQueue.map((p, i) => (
-                    <div key={p.id} className="relative group/avatar flex flex-col items-center">
-                        <div className={`w-10 h-10 rounded-full border-2 flex items-center justify-center font-bold text-xs relative z-10 transition-all ${
-                          i === 0
-                            ? 'border-indigo-500 text-indigo-500 ring-4 ring-indigo-500/20 scale-110 bg-neutral-900' 
-                            : 'border-neutral-800 bg-neutral-900 text-neutral-500'
-                        }`}>
+            <div className="flex items-center space-x-8 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setShowPlayers(true)}>
+                <div className="flex -space-x-3">
+                    {players.map((p, i) => (
+                        <div key={p.id} className={`w-10 h-10 rounded-full border-2 bg-neutral-800 flex items-center justify-center font-bold text-xs ${
+                          p.id === turnPlayer?.id 
+                            ? 'border-indigo-500 text-indigo-500 ring-2 ring-indigo-500/50' 
+                            : p.is_vip 
+                              ? 'border-yellow-500 text-yellow-500' 
+                              : 'border-neutral-950 text-white'
+                        }`} style={{ zIndex: players.length - i }}>
                             {p.nickname[0].toUpperCase()}
-                            {p.is_vip && <div className="absolute -top-2 -right-1 text-yellow-500 rotate-12"><Crown size={10} fill="currentColor"/></div>}
                         </div>
-                        {i === 1 && (
-                            <div className="absolute -bottom-5 text-[9px] font-bold uppercase tracking-wider text-neutral-500 bg-neutral-900 px-1 rounded">Next</div>
-                        )}
-                        {i === 0 && (
-                            <div className="absolute -bottom-5 text-[9px] font-bold uppercase tracking-wider text-indigo-500 bg-neutral-900 px-1 rounded animate-pulse">Play</div>
-                        )}
-                    </div>
-                  ))}
-                  {hiddenCount > 0 && (
-                      <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-[10px] text-neutral-500 font-bold border border-neutral-700">
-                          +{hiddenCount}
-                      </div>
-                  )}
+                    ))}
                 </div>
+                <div className="text-neutral-500 text-sm font-medium">{players.length} {t("djsOnline")}</div>
             </div>
-
             <div className="flex items-center space-x-6">
                 <button onClick={() => setShowPlayers(true)} className="p-3 rounded-full bg-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-700 transition-colors" title={t("managePlayers")}>
                     <User size={20} />
@@ -589,35 +472,16 @@ export default function GameView() {
         )}
       </div>
       <div className="flex items-center justify-between px-4 py-4 shrink-0 h-20">
-        {/* Queue Visualization (Playing State) */}
-        <div className="flex items-center space-x-4 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setShowPlayers(true)}>
-             <div className="flex items-center space-x-2">
-                  {visibleQueue.map((p, i) => (
-                    <div key={p.id} className="relative group/avatar flex flex-col items-center">
-                        <div className={`w-10 h-10 rounded-full border-2 flex items-center justify-center font-bold text-xs relative z-10 transition-all ${
-                          i === 0
-                            ? 'border-indigo-500 text-indigo-500 ring-4 ring-indigo-500/20 scale-110 bg-neutral-900' 
-                            : 'border-neutral-800 bg-neutral-900 text-neutral-500'
-                        }`}>
-                            {p.nickname[0].toUpperCase()}
-                            {p.is_vip && <div className="absolute -top-2 -right-1 text-yellow-500 rotate-12"><Crown size={10} fill="currentColor"/></div>}
-                        </div>
-                        {i === 1 && (
-                            <div className="absolute -bottom-5 text-[9px] font-bold uppercase tracking-wider text-neutral-500 bg-neutral-900 px-1 rounded">Next</div>
-                        )}
-                        {i === 0 && (
-                            <div className="absolute -bottom-5 text-[9px] font-bold uppercase tracking-wider text-indigo-500 bg-neutral-900 px-1 rounded animate-pulse">Now</div>
-                        )}
+        <div className="flex items-center space-x-8 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setShowPlayers(true)}>
+            <div className="flex -space-x-3">
+                {players.map((p, i) => (
+                    <div key={p.id} className={`w-10 h-10 rounded-full border-2 bg-neutral-800 flex items-center justify-center font-bold text-xs ${p.is_vip ? 'border-yellow-500 text-yellow-500' : 'border-neutral-950 text-white'}`} style={{ zIndex: players.length - i }}>
+                        {p.nickname[0].toUpperCase()}
                     </div>
-                  ))}
-                  {hiddenCount > 0 && (
-                      <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-[10px] text-neutral-500 font-bold border border-neutral-700">
-                          +{hiddenCount}
-                      </div>
-                  )}
+                ))}
             </div>
+            <div className="text-neutral-500 text-sm font-medium">{players.length} {t("djsOnline")}</div>
         </div>
-
         <div className="flex items-center space-x-6">
             <button onClick={() => setShowPlayers(true)} className="p-3 rounded-full bg-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-700 transition-colors" title={t("managePlayers")}>
                 <User size={20} />

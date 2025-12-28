@@ -6,6 +6,7 @@ import { useState } from "react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useI18n } from "@/components/LanguageProvider";
 import { Room, Player, QueueItem } from "@/lib/types";
+import { advanceToNextSong } from "@/lib/utils";
 
 interface VIPControlsProps {
   room: Room;
@@ -19,77 +20,9 @@ export default function VIPControls({ room, players, queueItems }: VIPControlsPr
   const [kickPlayerId, setKickPlayerId] = useState<string | null>(null);
   const [kickPlayerName, setKickPlayerName] = useState("");
 
-  // Get or initialize player order
-  const getPlayerOrder = (currentPlayers: Player[], currentOrder?: string[]): string[] => {
-    if (currentOrder && Array.isArray(currentOrder)) {
-      const validPlayers = currentOrder.filter(
-        pid => currentPlayers.some(p => p.id === pid)
-      );
-      const newPlayers = currentPlayers
-        .filter(p => !validPlayers.includes(p.id))
-        .map(p => p.id);
-      return [...validPlayers, ...newPlayers];
-    }
-    return currentPlayers.map(p => p.id);
-  };
-
   const handleSkip = () => {
     updateState(doc => {
-        const activeItem = doc.queue_items[doc.room.active_queue_item_id || ""];
-        
-        if (activeItem) {
-            activeItem.status = "PLAYED";
-        }
-
-        const currentPlayers = Object.values(doc.players);
-        const playerOrder = getPlayerOrder(currentPlayers, doc.room.player_order);
-
-        if (playerOrder.length === 0) {
-            delete doc.room.current_video_id;
-            delete doc.room.active_player_id;
-            delete doc.room.active_queue_item_id;
-            delete doc.room.playback_started_at;
-            return;
-        }
-
-        let nextTurnIndex = (doc.room.current_turn_index ?? -1);
-        let foundSong = false;
-        let attempts = 0;
-
-        while (attempts < playerOrder.length) {
-            nextTurnIndex = (nextTurnIndex + 1);
-            const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
-            
-            const nextPlayerQueue = Object.values(doc.queue_items)
-                .filter(q => q.status === "PENDING" && q.player_id === nextPlayerId)
-                .sort((a, b) => a.created_at - b.created_at);
-            
-            if (nextPlayerQueue.length > 0) {
-                const nextItem = nextPlayerQueue[0];
-                doc.room.current_video_id = nextItem.video_id;
-                doc.room.current_start_time = nextItem.highlight_start;
-                doc.room.playback_started_at = Date.now();
-                doc.room.active_player_id = nextPlayerId;
-                doc.room.active_queue_item_id = nextItem.id;
-                doc.room.player_order = playerOrder;
-                doc.room.current_turn_index = nextTurnIndex % playerOrder.length;
-                foundSong = true;
-                break;
-            }
-            attempts++;
-        }
-
-        if (!foundSong) {
-             nextTurnIndex = (doc.room.current_turn_index ?? -1) + 1;
-             const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
-
-             delete doc.room.current_video_id;
-             doc.room.active_player_id = nextPlayerId;
-             delete doc.room.active_queue_item_id;
-             delete doc.room.playback_started_at;
-             doc.room.player_order = playerOrder;
-             doc.room.current_turn_index = nextTurnIndex % playerOrder.length;
-        }
+      advanceToNextSong(doc);
     });
   };
 
@@ -215,32 +148,6 @@ export default function VIPControls({ room, players, queueItems }: VIPControlsPr
                 >
                     <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
                         room.auto_skip !== false 
-                            ? "translate-x-6" 
-                            : "translate-x-0.5"
-                    }`} />
-                </button>
-            </div>
-
-            {/* Allow Self Voting Toggle */}
-            <div className="flex items-center justify-between pt-2 border-t border-neutral-800">
-                <div className="flex flex-col">
-                    <span className="text-xs font-bold text-neutral-300">
-                        {language === "de" ? "Eigene Songs bewerten" : "Self-Voting"}
-                    </span>
-                    <span className="text-[10px] text-neutral-500">
-                        {language === "de" ? "Erlaubt DJs für ihre eigenen Songs zu stimmen" : "Allow DJs to vote for their own songs"}
-                    </span>
-                </div>
-                <button 
-                    onClick={() => updateState(doc => doc.room.allow_self_voting = !doc.room.allow_self_voting)}
-                    className={`relative w-12 h-6 rounded-full transition-colors ${
-                        room.allow_self_voting 
-                            ? "bg-indigo-500" 
-                            : "bg-neutral-700"
-                    }`}
-                >
-                    <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
-                        room.allow_self_voting 
                             ? "translate-x-6" 
                             : "translate-x-0.5"
                     }`} />

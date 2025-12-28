@@ -15,6 +15,7 @@ import { Slider } from "@/components/ui/slider";
 import SummaryView from "@/components/host/SummaryView";
 import { useI18n } from "@/components/LanguageProvider";
 import { saveSession, SessionSong } from "@/lib/session-history";
+import { advanceToNextSong } from "@/lib/utils";
 
 function PlayContent() {
   const { t, language, setLanguage } = useI18n();
@@ -53,64 +54,18 @@ function PlayContent() {
   const previousQueueItem = state.queue_items[room.previous_queue_item_id || ""];
   const isMyTurn = room.active_player_id === peerId;
 
-  // Get or initialize player order (helper for skip logic)
-  const getPlayerOrder = (currentPlayers: typeof state.players[string][], currentOrder?: string[]): string[] => {
-    if (currentOrder && Array.isArray(currentOrder)) {
-      const validPlayers = currentOrder.filter(
-        pid => currentPlayers.some(p => p.id === pid)
-      );
-      const newPlayers = currentPlayers
-        .filter(p => !validPlayers.includes(p.id))
-        .map(p => p.id);
-      return [...validPlayers, ...newPlayers];
-    }
-    return currentPlayers.map(p => p.id);
-  };
-
   const handleSkip = () => {
     updateState(doc => {
         const activeItem = doc.queue_items[doc.room.active_queue_item_id || ""];
         
-        // Mark as played/skipped so it doesn't play again immediately
+        // Mark as skipped and save for previous item voting
         if (activeItem) {
             activeItem.status = "SKIPPED";
             doc.room.previous_queue_item_id = activeItem.id;
         }
 
-        const currentPlayers = Object.values(doc.players);
-        const playerOrder = getPlayerOrder(currentPlayers, doc.room.player_order);
-
-        if (playerOrder.length === 0) {
-            delete doc.room.current_video_id;
-            delete doc.room.active_player_id;
-            delete doc.room.active_queue_item_id;
-            delete doc.room.playback_started_at;
-            return;
-        }
-
-        let nextTurnIndex = (doc.room.current_turn_index ?? -1) + 1;
-        const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
-        
-        // Check if they have a song
-        const nextPlayerQueue = Object.values(doc.queue_items)
-            .filter(q => q.status === "PENDING" && q.player_id === nextPlayerId)
-            .sort((a, b) => a.created_at - b.created_at);
-        
-        doc.room.player_order = playerOrder;
-        doc.room.current_turn_index = nextTurnIndex % playerOrder.length;
-        doc.room.active_player_id = nextPlayerId;
-
-        if (nextPlayerQueue.length > 0) {
-            const nextItem = nextPlayerQueue[0];
-            doc.room.current_video_id = nextItem.video_id;
-            doc.room.current_start_time = nextItem.highlight_start;
-            doc.room.playback_started_at = Date.now();
-            doc.room.active_queue_item_id = nextItem.id;
-        } else {
-             delete doc.room.current_video_id;
-             delete doc.room.active_queue_item_id;
-             delete doc.room.playback_started_at;
-        }
+        // Use shared utility to advance to next song (but don't mark as played again)
+        advanceToNextSong(doc, false);
     });
   };
 

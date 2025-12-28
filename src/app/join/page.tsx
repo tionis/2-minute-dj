@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 function JoinContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { state, updateState, setRoomId, peerId, isConnected, setHostMode } = useGameStore();
+  const { state, updateState, setRoomId, peerId, isConnected } = useGameStore();
 
   const [code, setCode] = useState("");
   const [nickname, setNickname] = useState("");
@@ -17,11 +17,6 @@ function JoinContent() {
   const [errorMsg, setErrorMsg] = useState("");
   const [hasTriedJoin, setHasTriedJoin] = useState(false);
   const [connectionTimedOut, setConnectionTimedOut] = useState(false);
-
-  // Ensure we are in client mode
-  useEffect(() => {
-      setHostMode(false);
-  }, [setHostMode]);
 
   // Auto-fill code from URL if present
   useEffect(() => {

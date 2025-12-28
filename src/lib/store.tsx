@@ -45,9 +45,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [peerId, setPeerId] = useState<string>("");
 
-  // Host Mode Persistence
-  const isHostRef = useRef(false);
-
   // Automerge State
   const docRef = useRef<Automerge.Doc<GameState>>(Automerge.from(initialState as unknown as Record<string, unknown>) as Automerge.Doc<GameState>);
   const [docState, setDocState] = useState<Automerge.Doc<GameState>>(docRef.current);
@@ -61,22 +58,29 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   // This prevents unnecessary room reconnections when callbacks change
   const updateDocRef = useRef<(newDoc: Automerge.Doc<GameState>) => void>(() => {});
   const syncWithPeerRef = useRef<(targetPeerId: string) => void>(() => {});
+  
+  // Debounce timer for localStorage saves to avoid performance issues
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Helper to update doc and trigger React re-render
   const updateDoc = useCallback((newDoc: Automerge.Doc<GameState>) => {
     docRef.current = newDoc;
     setDocState(newDoc);
     
-    // Persist to localStorage only if Host
-    if (isHostRef.current) {
-        try {
-            const bytes = Automerge.save(newDoc);
-            const base64 = uint8ArrayToBase64(bytes);
-            localStorage.setItem('2mdj_doc_backup', base64);
-        } catch (e) {
-            console.error("Failed to save state", e);
-        }
+    // Debounced persist to localStorage using safe base64 conversion
+    // This prevents performance issues when state changes rapidly
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
     }
+    saveTimeoutRef.current = setTimeout(() => {
+      try {
+          const bytes = Automerge.save(docRef.current);
+          const base64 = uint8ArrayToBase64(bytes);
+          localStorage.setItem('2mdj_doc_backup', base64);
+      } catch (e) {
+          console.error("Failed to save state", e);
+      }
+    }, 500); // Debounce saves by 500ms
   }, []);
 
   // Keep ref in sync with latest callback
@@ -84,44 +88,20 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     updateDocRef.current = updateDoc;
   }, [updateDoc]);
 
-  // Load initial state ONLY if we were previously a host
+  // Load initial state
   useEffect(() => {
-      const isHost = localStorage.getItem('2mdj_is_host') === 'true';
-      isHostRef.current = isHost;
-
-      if (isHost) {
-          const saved = localStorage.getItem('2mdj_doc_backup');
-          if (saved) {
-              try {
-                  const binary = base64ToUint8Array(saved);
-                  const loadedDoc = Automerge.load<GameState>(binary);
-                  docRef.current = loadedDoc;
-                  setDocState(loadedDoc);
-              } catch (e) {
-                  console.error("Failed to load state", e);
-              }
+      const saved = localStorage.getItem('2mdj_doc_backup');
+      if (saved) {
+          try {
+              const binary = base64ToUint8Array(saved);
+              const loadedDoc = Automerge.load<GameState>(binary);
+              docRef.current = loadedDoc;
+              setDocState(loadedDoc);
+          } catch (e) {
+              console.error("Failed to load state", e);
           }
-      } else {
-          // If we are not host, ensure we don't have lingering backup
-          // (Though we just ignore it, cleaning it up is nice but optional. 
-          //  We won't delete it here to avoid accidental data loss if logic is wrong,
-          //  but we won't load it.)
       }
   }, []);
-
-  const setHostMode = useCallback((isHost: boolean) => {
-      isHostRef.current = isHost;
-      if (isHost) {
-          localStorage.setItem('2mdj_is_host', 'true');
-          // Trigger a save immediately
-          updateDoc(docRef.current);
-      } else {
-          localStorage.setItem('2mdj_is_host', 'false');
-          localStorage.removeItem('2mdj_doc_backup');
-          // Note: We don't reset state here, just persistence. 
-          // If a user switches from Host to Join, the page navigation/logic should handle state reset if needed.
-      }
-  }, [updateDoc]);
 
   // Update sync state for a peer
   const updateSyncState = useCallback((targetPeerId: string, newSyncState: Automerge.SyncState) => {
@@ -162,15 +142,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       }
       setIsConnected(false);
       return;
-    }
-
-    // CHECK: Reset state if room code mismatch (e.g. joining new room with old state)
-    // We access the raw docRef to get the latest state without triggering re-renders
-    if (docRef.current.room?.code && docRef.current.room.code !== roomId) {
-        console.log(`Room code mismatch (current: ${docRef.current.room.code}, target: ${roomId}). Resetting state.`);
-        const newDoc = Automerge.from(initialState as unknown as Record<string, unknown>) as Automerge.Doc<GameState>;
-        updateDocRef.current(newDoc);
-        syncStatesRef.current = {};
     }
 
     const appId = '2-minute-dj-v1'; // Namespace
@@ -221,30 +192,12 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     };
   }, [roomId]); // Only re-run when roomId changes
 
-  // Heartbeat Sync: Ensure convergence every 5 seconds
-  useEffect(() => {
-    if (!isConnected) return;
-    
-    const heartbeat = setInterval(() => {
-        peers.forEach(p => syncWithPeerRef.current(p));
-    }, 5000);
-
-    return () => clearInterval(heartbeat);
-  }, [isConnected, peers]);
-
   // Public API to update state
   const updateState = useCallback((callback: (doc: GameState) => void) => {
     const newDoc = Automerge.change(docRef.current, callback);
     updateDoc(newDoc);
     broadcastChanges();
   }, [updateDoc, broadcastChanges]);
-
-  // Public API to reset state (clear history)
-  const resetState = useCallback(() => {
-    const newDoc = Automerge.from(initialState as unknown as Record<string, unknown>) as Automerge.Doc<GameState>;
-    updateDoc(newDoc);
-    syncStatesRef.current = {};
-  }, [updateDoc]);
 
   // Generate a stable Peer ID for this session if not exists
   useEffect(() => {
@@ -256,14 +209,21 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setPeerId(id);
   }, []);
 
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
+
   return (
     <StoreContext.Provider value={{ 
       state: docState, 
-      updateState,
-      resetState,
+      updateState, 
       roomId, 
       setRoomId, 
-      setHostMode,
       peerId,
       peers,
       isConnected
