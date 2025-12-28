@@ -8,6 +8,7 @@ export interface Room {
   playback_started_at?: number;
   active_player_id?: string;
   active_queue_item_id?: string;
+  previous_queue_item_id?: string;
   timer_duration?: number;
   paused_at?: number;
   auto_skip?: boolean;

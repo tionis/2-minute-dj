@@ -36,6 +36,7 @@ function PlayContent() {
   const [showNameModal, setShowNameModal] = useState(false);
   const [deleteItemId, setDeleteItem] = useState<string | null>(null);
   const [localVote, setLocalVote] = useState(50);
+  const [localPrevVote, setLocalPrevVote] = useState(50);
 
   const room = state.room;
   const player = state.players[peerId];
@@ -48,6 +49,7 @@ function PlayContent() {
   const isVip = player?.is_vip || false;
   
   const activeQueueItem = state.queue_items[room.active_queue_item_id || ""];
+  const previousQueueItem = state.queue_items[room.previous_queue_item_id || ""];
   const isMyTurn = room.active_player_id === peerId;
 
   // Get or initialize player order (helper for skip logic)
@@ -71,6 +73,7 @@ function PlayContent() {
         // Mark as played/skipped so it doesn't play again immediately
         if (activeItem) {
             activeItem.status = "SKIPPED";
+            doc.room.previous_queue_item_id = activeItem.id;
         }
 
         const currentPlayers = Object.values(doc.players);
@@ -84,45 +87,28 @@ function PlayContent() {
             return;
         }
 
-        let nextTurnIndex = (doc.room.current_turn_index ?? -1);
-        let foundSong = false;
-        let attempts = 0;
+        let nextTurnIndex = (doc.room.current_turn_index ?? -1) + 1;
+        const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
+        
+        // Check if they have a song
+        const nextPlayerQueue = Object.values(doc.queue_items)
+            .filter(q => q.status === "PENDING" && q.player_id === nextPlayerId)
+            .sort((a, b) => a.created_at - b.created_at);
+        
+        doc.room.player_order = playerOrder;
+        doc.room.current_turn_index = nextTurnIndex % playerOrder.length;
+        doc.room.active_player_id = nextPlayerId;
 
-        // Try to find next player with a song
-        while (attempts < playerOrder.length) {
-            nextTurnIndex = (nextTurnIndex + 1);
-            const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
-            
-            const nextPlayerQueue = Object.values(doc.queue_items)
-                .filter(q => q.status === "PENDING" && q.player_id === nextPlayerId)
-                .sort((a, b) => a.created_at - b.created_at);
-            
-            if (nextPlayerQueue.length > 0) {
-                const nextItem = nextPlayerQueue[0];
-                doc.room.current_video_id = nextItem.video_id;
-                doc.room.current_start_time = nextItem.highlight_start;
-                doc.room.playback_started_at = Date.now();
-                doc.room.active_player_id = nextPlayerId;
-                doc.room.active_queue_item_id = nextItem.id;
-                doc.room.player_order = playerOrder;
-                doc.room.current_turn_index = nextTurnIndex % playerOrder.length;
-                foundSong = true;
-                break;
-            }
-            attempts++;
-        }
-
-        // If no one has songs, just pass turn to next player in circle
-        if (!foundSong) {
-             nextTurnIndex = (doc.room.current_turn_index ?? -1) + 1;
-             const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
-
+        if (nextPlayerQueue.length > 0) {
+            const nextItem = nextPlayerQueue[0];
+            doc.room.current_video_id = nextItem.video_id;
+            doc.room.current_start_time = nextItem.highlight_start;
+            doc.room.playback_started_at = Date.now();
+            doc.room.active_queue_item_id = nextItem.id;
+        } else {
              delete doc.room.current_video_id;
-             doc.room.active_player_id = nextPlayerId;
              delete doc.room.active_queue_item_id;
              delete doc.room.playback_started_at;
-             doc.room.player_order = playerOrder;
-             doc.room.current_turn_index = nextTurnIndex % playerOrder.length;
         }
     });
   };
@@ -166,6 +152,23 @@ function PlayContent() {
           }
       });
   };
+
+  const commitPreviousVote = () => {
+      if (!previousQueueItem) return;
+      updateState(doc => {
+          const item = doc.queue_items[previousQueueItem.id];
+          if (item) {
+              if (!item.votes) item.votes = {};
+              item.votes[peerId] = localPrevVote;
+          }
+      });
+  };
+
+  // Initialize prev vote
+  useEffect(() => {
+    // Only reset if we change the previous item reference
+    setLocalPrevVote(50); 
+  }, [previousQueueItem?.id]);
 
   const handleQueue = (startTime: number) => {
     if (!videoData) return;
@@ -543,6 +546,40 @@ function PlayContent() {
                     <ThumbsUp 
                         size={20} 
                         className={`transition-colors ${localVote > 75 ? "text-green-500 fill-current" : "text-neutral-600"}`} 
+                    />
+                </div>
+            </div>
+        )}
+
+        {/* Previous Song Voting - If missed */}
+        {previousQueueItem && (!previousQueueItem.votes?.[peerId]) && (previousQueueItem.player_id !== peerId || room.allow_self_voting) && (
+            <div className="bg-neutral-900/50 p-3 rounded-2xl flex flex-col space-y-2 border border-neutral-800 animate-in fade-in mt-2">
+                <div className="flex items-center justify-between">
+                     <span className="text-[10px] uppercase tracking-widest text-neutral-500 font-bold">
+                        {language === "de" ? "Letzten Song bewerten" : "Rate Last Song"}
+                     </span>
+                     <span className="text-xs font-bold truncate text-white max-w-[150px]">{previousQueueItem.video_title}</span>
+                </div>
+                <div className="flex items-center space-x-3">
+                    <ThumbsDown 
+                        size={16} 
+                        className={`transition-colors ${localPrevVote < 25 ? "text-red-500 fill-current" : "text-neutral-600"}`} 
+                    />
+                    <div className="flex-1 relative h-4 flex items-center">
+                        <div className="absolute inset-0 h-1.5 bg-gradient-to-r from-red-900 via-neutral-700 to-green-900 rounded-full my-auto" />
+                        <Slider 
+                            min={0}
+                            max={100}
+                            value={localPrevVote}
+                            onChange={(e) => setLocalPrevVote(Number(e.target.value))}
+                            onMouseUp={commitPreviousVote}
+                            onTouchEnd={commitPreviousVote}
+                            className="relative z-10"
+                        />
+                    </div>
+                    <ThumbsUp 
+                        size={16} 
+                        className={`transition-colors ${localPrevVote > 75 ? "text-green-500 fill-current" : "text-neutral-600"}`} 
                     />
                 </div>
             </div>

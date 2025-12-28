@@ -123,9 +123,10 @@ export default function GameView() {
     updateState(doc => {
         const currentActiveItem = doc.queue_items[doc.room.active_queue_item_id || ""];
 
-        // Mark played
+        // Mark played and save as previous
         if (currentActiveItem) {
             currentActiveItem.status = "PLAYED";
+            doc.room.previous_queue_item_id = currentActiveItem.id;
         }
 
         const currentPlayers = Object.values(doc.players);
@@ -139,54 +140,33 @@ export default function GameView() {
             return;
         }
 
-        // Calculate next turn logic
-        // This logic is slightly complex because we need to find the next player WITH A SONG.
-        // If we just iterate one by one, we might find a player with no songs.
-        // We should check up to N players (where N = count) to find one.
+        // Strict Round Robin: Just pick the next player, regardless of whether they have a song.
+        let nextTurnIndex = (doc.room.current_turn_index ?? -1) + 1;
+        const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
+        
+        // Check if they have a song
+        const nextPlayerQueue = Object.values(doc.queue_items)
+            .filter(q => q.status === "PENDING" && q.player_id === nextPlayerId)
+            .sort((a, b) => a.created_at - b.created_at);
+        
+        doc.room.player_order = playerOrder;
+        doc.room.current_turn_index = nextTurnIndex % playerOrder.length;
+        doc.room.active_player_id = nextPlayerId;
 
-        let nextTurnIndex = (doc.room.current_turn_index ?? -1);
-        let foundSong = false;
-        let attempts = 0;
-
-        while (attempts < playerOrder.length) {
-            nextTurnIndex = (nextTurnIndex + 1);
-            const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
-            
-            // Find song for this player
-            const nextPlayerQueue = Object.values(doc.queue_items)
-                .filter(q => q.status === "PENDING" && q.player_id === nextPlayerId)
-                .sort((a, b) => a.created_at - b.created_at);
-            
-            if (nextPlayerQueue.length > 0) {
-                // Found one!
-                const nextItem = nextPlayerQueue[0];
-                doc.room.current_video_id = nextItem.video_id;
-                doc.room.current_start_time = nextItem.highlight_start;
-                doc.room.current_video_offset = nextItem.highlight_start;
-                doc.room.playback_started_at = Date.now();
-                doc.room.active_player_id = nextPlayerId;
-                doc.room.active_queue_item_id = nextItem.id;
-                doc.room.player_order = playerOrder;
-                doc.room.current_turn_index = nextTurnIndex % playerOrder.length; // Store the normalized index
-                foundSong = true;
-                break;
-            }
-            attempts++;
-        }
-
-        if (!foundSong) {
-            // No songs found for ANY player
-            // Just advance turn to next player anyway to show "Waiting for X"
-             nextTurnIndex = (doc.room.current_turn_index ?? -1) + 1;
-             const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
-
-             delete doc.room.current_video_id;
-             doc.room.active_player_id = nextPlayerId;
-             delete doc.room.active_queue_item_id;
-             delete doc.room.playback_started_at;
-             delete doc.room.current_video_offset;
-             doc.room.player_order = playerOrder;
-             doc.room.current_turn_index = nextTurnIndex % playerOrder.length;
+        if (nextPlayerQueue.length > 0) {
+            // Found one!
+            const nextItem = nextPlayerQueue[0];
+            doc.room.current_video_id = nextItem.video_id;
+            doc.room.current_start_time = nextItem.highlight_start;
+            doc.room.current_video_offset = nextItem.highlight_start;
+            doc.room.playback_started_at = Date.now();
+            doc.room.active_queue_item_id = nextItem.id;
+        } else {
+            // No song, but it's their turn (Waiting state)
+            delete doc.room.current_video_id;
+            delete doc.room.active_queue_item_id;
+            delete doc.room.playback_started_at;
+            delete doc.room.current_video_offset;
         }
     });
     setIsEnding(false);
