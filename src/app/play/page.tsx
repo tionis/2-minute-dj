@@ -50,6 +50,83 @@ function PlayContent() {
   const activeQueueItem = state.queue_items[room.active_queue_item_id || ""];
   const isMyTurn = room.active_player_id === peerId;
 
+  // Get or initialize player order (helper for skip logic)
+  const getPlayerOrder = (currentPlayers: typeof state.players[string][], currentOrder?: string[]): string[] => {
+    if (currentOrder && Array.isArray(currentOrder)) {
+      const validPlayers = currentOrder.filter(
+        pid => currentPlayers.some(p => p.id === pid)
+      );
+      const newPlayers = currentPlayers
+        .filter(p => !validPlayers.includes(p.id))
+        .map(p => p.id);
+      return [...validPlayers, ...newPlayers];
+    }
+    return currentPlayers.map(p => p.id);
+  };
+
+  const handleSkip = () => {
+    updateState(doc => {
+        const activeItem = doc.queue_items[doc.room.active_queue_item_id || ""];
+        
+        // Mark as played/skipped so it doesn't play again immediately
+        if (activeItem) {
+            activeItem.status = "SKIPPED";
+        }
+
+        const currentPlayers = Object.values(doc.players);
+        const playerOrder = getPlayerOrder(currentPlayers, doc.room.player_order);
+
+        if (playerOrder.length === 0) {
+            delete doc.room.current_video_id;
+            delete doc.room.active_player_id;
+            delete doc.room.active_queue_item_id;
+            delete doc.room.playback_started_at;
+            return;
+        }
+
+        let nextTurnIndex = (doc.room.current_turn_index ?? -1);
+        let foundSong = false;
+        let attempts = 0;
+
+        // Try to find next player with a song
+        while (attempts < playerOrder.length) {
+            nextTurnIndex = (nextTurnIndex + 1);
+            const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
+            
+            const nextPlayerQueue = Object.values(doc.queue_items)
+                .filter(q => q.status === "PENDING" && q.player_id === nextPlayerId)
+                .sort((a, b) => a.created_at - b.created_at);
+            
+            if (nextPlayerQueue.length > 0) {
+                const nextItem = nextPlayerQueue[0];
+                doc.room.current_video_id = nextItem.video_id;
+                doc.room.current_start_time = nextItem.highlight_start;
+                doc.room.playback_started_at = Date.now();
+                doc.room.active_player_id = nextPlayerId;
+                doc.room.active_queue_item_id = nextItem.id;
+                doc.room.player_order = playerOrder;
+                doc.room.current_turn_index = nextTurnIndex % playerOrder.length;
+                foundSong = true;
+                break;
+            }
+            attempts++;
+        }
+
+        // If no one has songs, just pass turn to next player in circle
+        if (!foundSong) {
+             nextTurnIndex = (doc.room.current_turn_index ?? -1) + 1;
+             const nextPlayerId = playerOrder[nextTurnIndex % playerOrder.length];
+
+             delete doc.room.current_video_id;
+             doc.room.active_player_id = nextPlayerId;
+             delete doc.room.active_queue_item_id;
+             delete doc.room.playback_started_at;
+             doc.room.player_order = playerOrder;
+             doc.room.current_turn_index = nextTurnIndex % playerOrder.length;
+        }
+    });
+  };
+
   // Sync local vote with DB when song changes or DB updates
   useEffect(() => {
       if (player && activeQueueItem?.votes?.[player.id] !== undefined) {
@@ -390,8 +467,32 @@ function PlayContent() {
           </div>
         )}
 
-        {/* Voting UI - Only when song is playing */}
-        {activeQueueItem && room.status !== "PAUSED" && (
+        {/* Skip My Song Control (When Playing) */}
+        {isMyTurn && activeQueueItem && room.status !== "PAUSED" && (
+             <div className="bg-neutral-900/80 p-4 rounded-2xl flex flex-col items-center space-y-3 border border-indigo-500/30 animate-in fade-in">
+                 <div className="text-center">
+                    <div className="text-[10px] uppercase tracking-widest text-indigo-400 font-bold mb-1">{t("nowSpinning")}</div>
+                    <div className="text-sm font-bold text-white max-w-[250px] truncate">{activeQueueItem.video_title || t("unknownTrack")}</div>
+                 </div>
+                 <button 
+                    onClick={handleSkip}
+                    className="w-full py-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-bold text-sm flex items-center justify-center space-x-2 transition-all border border-neutral-700"
+                 >
+                    <SkipForward size={16} />
+                    <span>{language === "de" ? "Meinen Song überspringen" : "Skip My Song"}</span>
+                 </button>
+             </div>
+        )}
+
+        {/* Voting UI - Only when song is playing AND NOT MY TURN (can't vote on own song usually, but let's allow it or hide it. Design choice: Hide voting if it's my song? Or allow? The prompt didn't specify. I'll keep voting visible for now, or maybe hide it if I added the skip control instead? 
+          Actually, usually you don't vote on your own song. But let's keep voting below if needed, or replace it.
+          The user requested "Skip their own songs". 
+          I'll keep the voting UI below BUT only show it if it's NOT my turn, OR show both?
+          If I show the Skip control, I might not need the Voting UI as prominently, or I can stack them.
+          Let's stack them, but typically you don't vote on yourself. 
+          I'll hide the Voting UI if it is my turn to reduce clutter and focus on "Skip".
+        */}
+        {activeQueueItem && room.status !== "PAUSED" && !isMyTurn && (
             <div className="bg-neutral-900/80 p-4 rounded-2xl flex flex-col space-y-4 border border-neutral-800 animate-in slide-in-from-top-2">
                 <div className="flex items-center justify-between">
                     <div className="flex flex-col overflow-hidden mr-4">
