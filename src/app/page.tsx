@@ -76,7 +76,7 @@ export default function Home() {
 
           <Link
             href="/history"
-            className="group w-full flex items-center justify-between p-4 rounded-xl bg-neutral-900/50 border border-neutral-800/50 hover:border-neutral-700 hover:bg-neutral-900 transition-all duration-300 outline-none focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+            className="group w-full flex items-center justify-between p-4 rounded-xl bg-neutral-900/50 border border-neutral-800/50 hover:border-neutral-700 hover:bg-neutral-900 transition-all duration-300 outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:ring-2 focus-visible:ring-neutral-700"
           >
             <div className="flex items-center space-x-3">
               <div className="p-2 rounded-full bg-neutral-800 group-hover:bg-neutral-700 transition-colors">
@@ -96,7 +96,7 @@ export default function Home() {
         {t("poweredBy")}
         <a href="https://automerge.org/" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-400 transition-colors">Automerge</a>
         {" + "}
-        <a href="https://oxism.com/trystero/" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-400 transition-colors">Trystero</a>
+        <a href="https://oxism.com/trystero/2" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-400 transition-colors">Trystero</a>
       </div>
     </div>
   );
