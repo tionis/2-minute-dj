@@ -7,7 +7,7 @@ export const translations = {
     hostDesc: "Use this device as the TV",
     joinGame: "Join Game",
     joinDesc: "Use your phone to play",
-    poweredBy: "Powered by InstantDB",
+    poweredBy: "Powered by ",
     
     // Host
     joinAt: "Join at",
@@ -65,7 +65,7 @@ export const translations = {
     hostDesc: "Dieses Gerät als TV nutzen",
     joinGame: "Spiel beitreten",
     joinDesc: "Nutze dein Handy zum Spielen",
-    poweredBy: "Betrieben von InstantDB",
+    poweredBy: "Betrieben von ",
     
     // Host
     joinAt: "Beitreten unter",
