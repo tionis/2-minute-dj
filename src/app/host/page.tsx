@@ -12,7 +12,7 @@ import { useI18n } from "@/components/LanguageProvider";
 
 export default function HostPage() {
   const { t, language, setLanguage } = useI18n();
-  const { state, updateState, roomId, setRoomId } = useGameStore();
+  const { state, updateState, resetState, roomId, setRoomId } = useGameStore();
   
   const [origin, setOrigin] = useState("");
   const [showQuitModal, setShowQuitModal] = useState(false);
@@ -88,6 +88,9 @@ export default function HostPage() {
 
     setRoomId(newRoomId);
 
+    // Reset state to ensure we don't carry over history from previous sessions
+    resetState();
+
     // Initialize state
     updateState(doc => {
         doc.room = {
@@ -99,7 +102,7 @@ export default function HostPage() {
         doc.players = {};
         doc.queue_items = {};
     });
-  }, [roomId, setRoomId, updateState]);
+  }, [roomId, setRoomId, updateState, resetState]);
 
   const handleQuitConfirm = () => {
       localStorage.removeItem("2mdj_host_roomId");

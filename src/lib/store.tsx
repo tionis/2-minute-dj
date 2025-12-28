@@ -135,6 +135,15 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // CHECK: Reset state if room code mismatch (e.g. joining new room with old state)
+    // We access the raw docRef to get the latest state without triggering re-renders
+    if (docRef.current.room?.code && docRef.current.room.code !== roomId) {
+        console.log(`Room code mismatch (current: ${docRef.current.room.code}, target: ${roomId}). Resetting state.`);
+        const newDoc = Automerge.from(initialState as unknown as Record<string, unknown>) as Automerge.Doc<GameState>;
+        updateDocRef.current(newDoc);
+        syncStatesRef.current = {};
+    }
+
     const appId = '2-minute-dj-v1'; // Namespace
     const room = joinRoom({ appId }, roomId);
     roomRef.current = room;
@@ -190,6 +199,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     broadcastChanges();
   }, [updateDoc, broadcastChanges]);
 
+  // Public API to reset state (clear history)
+  const resetState = useCallback(() => {
+    const newDoc = Automerge.from(initialState as unknown as Record<string, unknown>) as Automerge.Doc<GameState>;
+    updateDoc(newDoc);
+    syncStatesRef.current = {};
+  }, [updateDoc]);
+
   // Generate a stable Peer ID for this session if not exists
   useEffect(() => {
     let id = localStorage.getItem('2mdj_peer_id');
@@ -203,7 +219,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   return (
     <StoreContext.Provider value={{ 
       state: docState, 
-      updateState, 
+      updateState,
+      resetState,
       roomId, 
       setRoomId, 
       peerId,

@@ -7,6 +7,7 @@ import { GameState } from './types';
 export interface StoreContextType {
   state: Automerge.Doc<GameState>;
   updateState: (callback: (doc: GameState) => void) => void;
+  resetState: () => void;
   roomId: string | null;
   setRoomId: (id: string) => void;
   peerId: string;
