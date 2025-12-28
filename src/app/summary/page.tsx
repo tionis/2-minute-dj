@@ -4,23 +4,53 @@ import { useGameStore } from "@/lib/game-context";
 import { Loader2 } from "lucide-react";
 import SummaryView from "@/components/host/SummaryView";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
+import LZString from "lz-string";
 
 function SummaryContent() {
   const searchParams = useSearchParams();
   const urlRoomId = searchParams.get("roomId");
+  const urlData = searchParams.get("data");
   const { state, setRoomId, roomId } = useGameStore();
+  const [parsedData, setParsedData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (urlRoomId && urlRoomId !== roomId) {
+    if (urlData) {
+        try {
+            const decompressed = LZString.decompressFromEncodedURIComponent(urlData);
+            if (!decompressed) throw new Error("Failed to decompress data");
+            const data = JSON.parse(decompressed);
+            setParsedData(data);
+        } catch (e) {
+            console.error("Failed to parse summary data", e);
+            setError("Invalid summary link.");
+        }
+    } else if (urlRoomId && urlRoomId !== roomId) {
       setRoomId(urlRoomId);
     }
-  }, [urlRoomId, roomId, setRoomId]);
+  }, [urlData, urlRoomId, roomId, setRoomId]);
 
-  if (!urlRoomId) {
+  if (error) {
+      return (
+          <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-red-400 p-8">
+              {error}
+          </div>
+      );
+  }
+
+  if (parsedData) {
+      return (
+        <div className="min-h-screen bg-neutral-950 text-white p-12 overflow-y-auto">
+            <SummaryView data={parsedData} />
+        </div>
+      );
+  }
+
+  if (!urlRoomId && !urlData) {
     return (
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-red-400 p-8">
-        No Room ID provided.
+        No Room ID or Data provided.
       </div>
     );
   }

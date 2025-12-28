@@ -5,44 +5,67 @@ import { Trophy, ExternalLink, RotateCcw, ThumbsUp, Share, Download, FileCode } 
 import { useState } from "react";
 import ShareLinkModal from "@/components/ui/ShareLinkModal";
 import { useI18n } from "@/components/LanguageProvider";
+import LZString from "lz-string";
 
-export default function SummaryView() {
+interface SummarySong {
+    id: string; // ID used for key
+    video_id: string;
+    video_title: string;
+    player_nickname: string;
+    votes: number[]; // Just the values
+    status: "PLAYED" | "SKIPPED";
+}
+
+interface SummaryData {
+    roomCode: string;
+    songs: SummarySong[];
+}
+
+interface SummaryViewProps {
+    data?: SummaryData;
+}
+
+export default function SummaryView({ data }: SummaryViewProps) {
   const { t, language } = useI18n();
-  const { state, roomId } = useGameStore();
+  const { state } = useGameStore();
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [shareUrl, setShareUrl] = useState("");
 
-  const room = state.room;
+  // If data is provided (static view), use it. Otherwise derive from store.
+  const roomCode = data ? data.roomCode : state.room.code;
   
-  // Resolve queue items with players
-  const playedSongs = Object.values(state.queue_items)
-    .filter(q => q.status === "PLAYED" || q.status === "SKIPPED")
-    .sort((a, b) => a.created_at - b.created_at)
-    .map(q => ({
-        ...q,
-        player: state.players[q.player_id]
-    }));
+  const playedSongs: SummarySong[] = data 
+    ? data.songs 
+    : Object.values(state.queue_items)
+        .filter(q => q.status === "PLAYED" || q.status === "SKIPPED")
+        .sort((a, b) => a.created_at - b.created_at)
+        .map(q => ({
+            id: q.id,
+            video_id: q.video_id,
+            video_title: q.video_title || "Unknown Track",
+            player_nickname: state.players[q.player_id]?.nickname || "Unknown",
+            votes: q.votes ? Object.values(q.votes) : [],
+            status: q.status as "PLAYED" | "SKIPPED"
+        }));
 
-  const calculateScore = (votes: any) => {
-      if (!votes) return null;
-      const values = Object.values(votes) as number[];
-      if (values.length === 0) return null;
-      const sum = values.reduce((a, b) => a + b, 0);
-      return Math.round(sum / values.length);
+  const calculateScore = (votes: number[]) => {
+      if (!votes || votes.length === 0) return null;
+      const sum = votes.reduce((a, b) => a + b, 0);
+      return Math.round(sum / votes.length);
   };
 
   const handleDownloadJSON = () => {
       const exportData = {
-          room: room,
-          players: state.players,
-          queue_items: state.queue_items
+          roomCode,
+          songs: playedSongs,
+          generatedAt: new Date().toISOString()
       };
-      const data = JSON.stringify(exportData, null, 2);
-      const blob = new Blob([data], { type: "application/json" });
+      const json = JSON.stringify(exportData, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `2mdj-session-${room.code}.json`;
+      link.download = `2mdj-session-${roomCode}.json`;
       link.click();
       URL.revokeObjectURL(url);
   };
@@ -53,7 +76,7 @@ export default function SummaryView() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>2-Minute DJ Session - ${room.code}</title>
+  <title>2-Minute DJ Session - ${roomCode}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #fff; padding: 40px 20px; line-height: 1.6; }
@@ -80,19 +103,18 @@ export default function SummaryView() {
 <body>
   <div class="container">
     <h1>🎧 Session Summary</h1>
-    <p class="subtitle">${playedSongs.length} tracks shared • Room: ${room.code}</p>
+    <p class="subtitle">${playedSongs.length} tracks shared • Room: ${roomCode}</p>
     
     ${playedSongs.map((song, index) => {
       const score = calculateScore(song.votes);
       const scoreClass = score !== null ? (score > 75 ? 'good' : score < 25 ? 'bad' : 'neutral') : '';
-      const player = song.player;
       return `
     <div class="song">
       <div class="index">${index + 1}</div>
       <img class="thumbnail" src="https://img.youtube.com/vi/${song.video_id}/mqdefault.jpg" alt="" onerror="this.style.display='none'">
       <div class="info">
         <div class="title">${song.video_title || `Unknown Track (${song.video_id})`}${song.status === 'SKIPPED' ? '<span class="skipped">Skipped</span>' : ''}</div>
-        <div class="dj">DJ ${player?.nickname || 'Unknown'}</div>
+        <div class="dj">DJ ${song.player_nickname}</div>
       </div>
       ${score !== null ? `<div class="score ${scoreClass}">${score}%</div>` : ''}
       <a class="link" href="https://youtube.com/watch?v=${song.video_id}" target="_blank" rel="noopener">▶</a>
@@ -108,14 +130,28 @@ export default function SummaryView() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `2mdj-session-${room.code}.html`;
+    link.download = `2mdj-session-${roomCode}.html`;
     link.click();
     URL.revokeObjectURL(url);
   };
 
   const handleShareLink = () => {
-      // Use roomId (which is code in P2P) for the link
-      const url = `${typeof window !== "undefined" ? window.location.origin : ""}/summary?roomId=${room.code}`;
+      let url = "";
+      
+      if (data) {
+          // If we are already viewing a static summary, just share the current URL
+          url = typeof window !== "undefined" ? window.location.href : "";
+      } else {
+          // We are the host, generate the compressed link
+          const summaryData: SummaryData = {
+              roomCode: state.room.code,
+              songs: playedSongs
+          };
+          const json = JSON.stringify(summaryData);
+          const compressed = LZString.compressToEncodedURIComponent(json);
+          url = `${typeof window !== "undefined" ? window.location.origin : ""}/summary?data=${compressed}`;
+      }
+      
       setShareUrl(url);
       setShowLinkModal(true);
   };
@@ -178,7 +214,7 @@ export default function SummaryView() {
                                         )}
                                     </h3>
                                     <p className="text-neutral-500 text-sm font-medium">
-                                        DJ { song.player?.nickname || t("unknownDj") }
+                                        DJ { song.player_nickname }
                                     </p>
                                 </div>
                             </div>
@@ -213,13 +249,15 @@ export default function SummaryView() {
 
       {/* Action */}
       <div className="flex flex-col sm:flex-row justify-center items-center gap-4 flex-wrap">
-        <button 
-            onClick={handleNewSession}
-            className="flex items-center space-x-2 px-8 py-4 rounded-full bg-white text-black font-bold text-lg hover:bg-neutral-200 transition-all"
-        >
-            <RotateCcw size={20} />
-            <span>{t("newSession")}</span>
-        </button>
+        {!data && (
+            <button 
+                onClick={handleNewSession}
+                className="flex items-center space-x-2 px-8 py-4 rounded-full bg-white text-black font-bold text-lg hover:bg-neutral-200 transition-all"
+            >
+                <RotateCcw size={20} />
+                <span>{t("newSession")}</span>
+            </button>
+        )}
 
         <button 
             onClick={handleShareLink}
