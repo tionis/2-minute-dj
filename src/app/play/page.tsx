@@ -400,7 +400,7 @@ function PlayContent() {
             <Edit2 size={12} className="opacity-50" />
           </div>
         </header>
-        <SummaryView />
+        <SummaryView goHome={true} />
         <ConfirmationModal 
             isOpen={showQuitModal}
             onCancel={() => setShowQuitModal(false)}

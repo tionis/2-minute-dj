@@ -23,11 +23,12 @@ interface SummaryData {
 
 interface SummaryViewProps {
     data?: SummaryData;
+    goHome?: boolean;
 }
 
-export default function SummaryView({ data }: SummaryViewProps) {
+export default function SummaryView({ data, goHome }: SummaryViewProps) {
   const { t, language } = useI18n();
-  const { state } = useGameStore();
+  const { state, setRoomId } = useGameStore();
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [shareUrl, setShareUrl] = useState("");
 
@@ -166,6 +167,11 @@ export default function SummaryView({ data }: SummaryViewProps) {
     }
   };
 
+  const handleGoHome = () => {
+    setRoomId(""); // Disconnect
+    window.location.href = "/";
+  };
+
   return (
     <div className="max-w-4xl mx-auto w-full py-12 space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-1000">
       
@@ -251,11 +257,11 @@ export default function SummaryView({ data }: SummaryViewProps) {
       <div className="flex flex-col sm:flex-row justify-center items-center gap-4 flex-wrap">
         {!data && (
             <button 
-                onClick={handleNewSession}
+                onClick={goHome ? handleGoHome : handleNewSession}
                 className="flex items-center space-x-2 px-8 py-4 rounded-full bg-white text-black font-bold text-lg hover:bg-neutral-200 transition-all"
             >
-                <RotateCcw size={20} />
-                <span>{t("newSession")}</span>
+                <RotateCcw size={20} className={goHome ? "rotate-0" : "rotate-ccw"} />
+                <span>{goHome ? (language === "de" ? "Startseite" : "Go Home") : t("newSession")}</span>
             </button>
         )}
 
