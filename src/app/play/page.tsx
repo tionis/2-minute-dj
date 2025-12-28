@@ -122,6 +122,11 @@ function PlayContent() {
       }
   }, [activeQueueItem?.id, player?.id]);
 
+  // Initialize prev vote when previous item changes
+  useEffect(() => {
+    setLocalPrevVote(50); 
+  }, [previousQueueItem?.id]);
+
   if (!roomId || !peerId) {
     return <div className="text-white p-8">Missing parameters. Please join again.</div>;
   }
@@ -163,12 +168,6 @@ function PlayContent() {
           }
       });
   };
-
-  // Initialize prev vote
-  useEffect(() => {
-    // Only reset if we change the previous item reference
-    setLocalPrevVote(50); 
-  }, [previousQueueItem?.id]);
 
   const handleQueue = (startTime: number) => {
     if (!videoData) return;
@@ -429,7 +428,7 @@ function PlayContent() {
             <Edit2 size={12} className="opacity-50" />
           </div>
         </header>
-        <SummaryView goHome={true} />
+        <SummaryView />
         <ConfirmationModal 
             isOpen={showQuitModal}
             onCancel={() => setShowQuitModal(false)}
