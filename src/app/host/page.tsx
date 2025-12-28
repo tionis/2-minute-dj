@@ -12,7 +12,7 @@ import { useI18n } from "@/components/LanguageProvider";
 
 export default function HostPage() {
   const { t, language, setLanguage } = useI18n();
-  const { state, updateState, roomId, setRoomId, isConnected } = useGameStore();
+  const { state, updateState, roomId, setRoomId } = useGameStore();
   
   const [origin, setOrigin] = useState("");
   const [showQuitModal, setShowQuitModal] = useState(false);

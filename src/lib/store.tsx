@@ -81,7 +81,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     if (message && sendSyncRef.current) {
       sendSyncRef.current(message, targetPeerId);
     }
-  }, [updateDoc, updateSyncState]);
+  }, [updateSyncState]);
 
   // Broadcast changes to all peers
   const broadcastChanges = useCallback(() => {

@@ -37,9 +37,12 @@ function JoinContent() {
   }, [code, setRoomId]);
 
   // Check if room is valid based on synced state
-  // We assume if we connected and got state, room.code should match.
-  // If we are alone, room.code is "" (default).
-  const isValidRoom = state.room.code === code && code.length === 4;
+  // We assume if we connected and got state, room.code should match for existing rooms.
+  // If we are alone and first to join, room.code is "" (default), but we can still be connected.
+  const isValidRoom =
+    code.length === 4 &&
+    (state.room.code === code ||
+      (hasTriedJoin && isConnected && !state.room.code));
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
