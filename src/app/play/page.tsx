@@ -484,15 +484,8 @@ function PlayContent() {
              </div>
         )}
 
-        {/* Voting UI - Only when song is playing AND NOT MY TURN (can't vote on own song usually, but let's allow it or hide it. Design choice: Hide voting if it's my song? Or allow? The prompt didn't specify. I'll keep voting visible for now, or maybe hide it if I added the skip control instead? 
-          Actually, usually you don't vote on your own song. But let's keep voting below if needed, or replace it.
-          The user requested "Skip their own songs". 
-          I'll keep the voting UI below BUT only show it if it's NOT my turn, OR show both?
-          If I show the Skip control, I might not need the Voting UI as prominently, or I can stack them.
-          Let's stack them, but typically you don't vote on yourself. 
-          I'll hide the Voting UI if it is my turn to reduce clutter and focus on "Skip".
-        */}
-        {activeQueueItem && room.status !== "PAUSED" && !isMyTurn && (
+        {/* Voting UI - Shown if not my turn OR if self-voting is allowed */}
+        {activeQueueItem && room.status !== "PAUSED" && (!isMyTurn || room.allow_self_voting) && (
             <div className="bg-neutral-900/80 p-4 rounded-2xl flex flex-col space-y-4 border border-neutral-800 animate-in slide-in-from-top-2">
                 <div className="flex items-center justify-between">
                     <div className="flex flex-col overflow-hidden mr-4">

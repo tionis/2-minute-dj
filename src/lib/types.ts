@@ -11,6 +11,7 @@ export interface Room {
   timer_duration?: number;
   paused_at?: number;
   auto_skip?: boolean;
+  allow_self_voting?: boolean;
   player_order?: string[];
   current_turn_index?: number;
   created_at: number;
