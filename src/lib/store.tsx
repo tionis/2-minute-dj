@@ -221,6 +221,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     };
   }, [roomId]); // Only re-run when roomId changes
 
+  // Heartbeat Sync: Ensure convergence every 5 seconds
+  useEffect(() => {
+    if (!isConnected) return;
+    
+    const heartbeat = setInterval(() => {
+        peers.forEach(p => syncWithPeerRef.current(p));
+    }, 5000);
+
+    return () => clearInterval(heartbeat);
+  }, [isConnected, peers]);
+
   // Public API to update state
   const updateState = useCallback((callback: (doc: GameState) => void) => {
     const newDoc = Automerge.change(docRef.current, callback);
