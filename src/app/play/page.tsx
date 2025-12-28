@@ -42,7 +42,7 @@ function PlayContent() {
   
   // Derived data
   const myQueue = Object.values(state.queue_items)
-      .filter(q => q.player_id === peerId)
+      .filter(q => q.player_id === peerId && q.status === "PENDING")
       .sort((a,b) => a.created_at - b.created_at);
       
   const isVip = player?.is_vip || false;
