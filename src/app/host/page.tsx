@@ -40,10 +40,10 @@ export default function HostPage() {
       }
   };
 
-  const handleToggleVIP = (player: any) => {
+  const handleToggleVIP = (playerId: string) => {
       updateState(doc => {
-          if (doc.players[player.id]) {
-              doc.players[player.id].is_vip = !doc.players[player.id].is_vip;
+          if (doc.players[playerId]) {
+              doc.players[playerId].is_vip = !doc.players[playerId].is_vip;
           }
       });
   };
@@ -369,7 +369,7 @@ export default function HostPage() {
                         <div className="absolute -top-2 -right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             {/* VIP Button */}
                             <button 
-                                onClick={() => handleToggleVIP(player)}
+                                onClick={() => handleToggleVIP(player.id)}
                                 className={`p-1 rounded-full hover:scale-110 transition-transform ${player.is_vip ? "bg-yellow-500 text-black" : "bg-neutral-700 text-neutral-400 hover:bg-yellow-500 hover:text-black"}`}
                                 title={t("toggleVip")}
                             >

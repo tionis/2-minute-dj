@@ -27,6 +27,7 @@ export default function GameView() {
   
   const stateRef = useRef(state);
   const isEndingRef = useRef(isEnding);
+  const handleNextSongRef = useRef<() => void>(() => {});
   
   useEffect(() => {
       stateRef.current = state;
@@ -61,7 +62,7 @@ export default function GameView() {
       const autoSkipEnabled = currentRoom.auto_skip !== false;
       if (remaining <= 0 && !isEndingRef.current && autoSkipEnabled) {
         setIsEnding(true); 
-        handleNextSong(); 
+        handleNextSongRef.current(); 
       }
     }, 500); 
 
@@ -71,7 +72,7 @@ export default function GameView() {
   useEffect(() => {
     const pendingCount = Object.values(state.queue_items).filter(q => q.status === "PENDING").length;
     if (room.status === "PLAYING" && !room.current_video_id && pendingCount > 0) {
-        handleNextSong();
+        handleNextSongRef.current();
     }
   }, [room.status, room.current_video_id, state.queue_items]);
 
@@ -191,6 +192,11 @@ export default function GameView() {
     setIsEnding(false);
   };
 
+  // Keep ref updated with latest handleNextSong
+  useEffect(() => {
+    handleNextSongRef.current = handleNextSong;
+  });
+
   const endSession = () => {
     updateState(doc => {
         const currentActiveItem = doc.queue_items[doc.room.active_queue_item_id || ""];
@@ -232,10 +238,10 @@ export default function GameView() {
       }
   };
 
-  const handleToggleVIP = (player: any) => {
+  const handleToggleVIP = (playerId: string) => {
       updateState(doc => {
-          if (doc.players[player.id]) {
-              doc.players[player.id].is_vip = !doc.players[player.id].is_vip;
+          if (doc.players[playerId]) {
+              doc.players[playerId].is_vip = !doc.players[playerId].is_vip;
           }
       });
   };
@@ -355,7 +361,7 @@ export default function GameView() {
                                 </div>
                             </div>
                             <div className="flex items-center space-x-2">
-                                <button onClick={() => handleToggleVIP(player)}
+                                <button onClick={() => handleToggleVIP(player.id)}
                                     className={`p-2 rounded-xl border transition-colors ${player.is_vip ? "bg-yellow-500/10 border-yellow-500 text-yellow-500" : "border-neutral-700 text-neutral-500 hover:text-yellow-500 hover:border-yellow-500"}`}
                                     title={t("toggleVip")}>
                                     <Crown size={16} fill={player.is_vip ? "currentColor" : "none"} />
