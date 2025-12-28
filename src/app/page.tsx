@@ -44,7 +44,7 @@ export default function Home() {
         <div className="w-full space-y-4">
           <Link
             href="/host"
-            className="group w-full flex items-center justify-between p-6 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-indigo-500/50 hover:bg-neutral-800 transition-all duration-300"
+            className="group w-full flex items-center justify-between p-6 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-indigo-500/50 hover:bg-neutral-800 transition-all duration-300 outline-none focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
           >
             <div className="flex items-center space-x-4">
               <div className="p-3 rounded-full bg-indigo-500/10 group-hover:bg-indigo-500/20 transition-colors">
@@ -60,7 +60,7 @@ export default function Home() {
 
           <Link
             href="/join"
-            className="group w-full flex items-center justify-between p-6 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-purple-500/50 hover:bg-neutral-800 transition-all duration-300"
+            className="group w-full flex items-center justify-between p-6 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-purple-500/50 hover:bg-neutral-800 transition-all duration-300 outline-none focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/50"
           >
             <div className="flex items-center space-x-4">
               <div className="p-3 rounded-full bg-purple-500/10 group-hover:bg-purple-500/20 transition-colors">
@@ -76,7 +76,7 @@ export default function Home() {
 
           <Link
             href="/history"
-            className="group w-full flex items-center justify-between p-4 rounded-xl bg-neutral-900/50 border border-neutral-800/50 hover:border-neutral-700 hover:bg-neutral-900 transition-all duration-300"
+            className="group w-full flex items-center justify-between p-4 rounded-xl bg-neutral-900/50 border border-neutral-800/50 hover:border-neutral-700 hover:bg-neutral-900 transition-all duration-300 outline-none focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
           >
             <div className="flex items-center space-x-3">
               <div className="p-2 rounded-full bg-neutral-800 group-hover:bg-neutral-700 transition-colors">
