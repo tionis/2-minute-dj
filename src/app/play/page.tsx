@@ -1,10 +1,9 @@
 "use client";
 
-import { db } from "@/lib/db";
+import { useGameStore } from "@/lib/game-context";
 import { useSearchParams } from "next/navigation";
 import { Loader2, Music4, Radio, Languages, Clock, Crown, Play, SkipForward } from "lucide-react";
-import { Suspense, useState, useEffect } from "react";
-import { id } from "@instantdb/react";
+import { Suspense, useState, useEffect, useRef } from "react";
 import SearchStep from "@/components/player/SearchStep";
 import ClipperStep from "@/components/player/ClipperStep";
 import SuccessStep from "@/components/player/SuccessStep";
@@ -15,12 +14,22 @@ import VIPControls from "@/components/player/VIPControls";
 import { Slider } from "@/components/ui/slider";
 import SummaryView from "@/components/host/SummaryView";
 import { useI18n } from "@/components/LanguageProvider";
+import { saveSession, SessionSong } from "@/lib/session-history";
+import { advanceToNextSong } from "@/lib/utils";
 
 function PlayContent() {
   const { t, language, setLanguage } = useI18n();
   const searchParams = useSearchParams();
-  const roomId = searchParams.get("roomId");
-  const playerId = searchParams.get("playerId");
+  const urlRoomId = searchParams.get("roomId");
+  
+  const { state, updateState, peerId, setRoomId, roomId, isConnected } = useGameStore();
+
+  // If we arrived here with a room ID in URL but not connected, connect.
+  useEffect(() => {
+      if (urlRoomId && urlRoomId !== roomId) {
+          setRoomId(urlRoomId);
+      }
+  }, [urlRoomId, roomId, setRoomId]);
 
   // Game State
   const [step, setStep] = useState<"SEARCH" | "CLIP" | "SUCCESS">("SEARCH");
@@ -29,34 +38,36 @@ function PlayContent() {
   const [showNameModal, setShowNameModal] = useState(false);
   const [deleteItemId, setDeleteItem] = useState<string | null>(null);
   const [localVote, setLocalVote] = useState(50);
+  const [localPrevVote, setLocalPrevVote] = useState(50);
 
-  const { data, isLoading, error } = db.useQuery(
-    roomId && playerId
-      ? {
-          rooms: {
-            $: { where: { id: roomId } },
-            players: {}, 
-            queue_items: { 
-                 $: { where: {  } } 
-            }
-          },
-          players: {
-            $: { where: { id: playerId } },
-            queue_items: { 
-                $: { where: { status: "PENDING" } }
-            }
-          },
-        }
-      : null
-  );
-
-  const room = data?.rooms?.[0];
-  const player = data?.players?.[0];
-  const myQueue = player?.queue_items || [];
+  const room = state.room;
+  const player = state.players[peerId];
+  
+  // Derived data
+  const myQueue = Object.values(state.queue_items)
+      .filter(q => q.player_id === peerId && q.status === "PENDING")
+      .sort((a,b) => a.created_at - b.created_at);
+      
   const isVip = player?.is_vip || false;
   
-  const activeQueueItem = room?.queue_items?.find(q => q.id === room?.active_queue_item_id);
-  const isMyTurn = room?.active_player_id === playerId;
+  const activeQueueItem = state.queue_items[room.active_queue_item_id || ""];
+  const previousQueueItem = state.queue_items[room.previous_queue_item_id || ""];
+  const isMyTurn = room.active_player_id === peerId;
+
+  const handleSkip = () => {
+    updateState(doc => {
+        const activeItem = doc.queue_items[doc.room.active_queue_item_id || ""];
+        
+        // Mark as skipped and save for previous item voting
+        if (activeItem) {
+            activeItem.status = "SKIPPED";
+            doc.room.previous_queue_item_id = activeItem.id;
+        }
+
+        // Use shared utility to advance to next song (but don't mark as played again)
+        advanceToNextSong(doc, false);
+    });
+  };
 
   // Sync local vote with DB when song changes or DB updates
   useEffect(() => {
@@ -67,47 +78,179 @@ function PlayContent() {
       }
   }, [activeQueueItem?.id, player?.id]);
 
-  if (!roomId || !playerId) {
-    return <div className="text-white p-8">Missing parameters. Please join again.</div>;
-  }
+  // Initialize prev vote when previous item changes
+  useEffect(() => {
+    setLocalPrevVote(50); 
+  }, [previousQueueItem?.id]);
 
-  if (isLoading) {
+  // Track if we've already saved this session to prevent duplicates
+  const sessionSavedRef = useRef(false);
+
+  // Save session to history when game ends (player view)
+  useEffect(() => {
+    if (room.status === "FINISHED" && !sessionSavedRef.current && room.code) {
+      sessionSavedRef.current = true;
+      
+      const songs: SessionSong[] = Object.values(state.queue_items)
+        .filter(q => q.status === "PLAYED" || q.status === "SKIPPED")
+        .sort((a, b) => a.created_at - b.created_at)
+        .map(q => ({
+          id: q.id,
+          video_id: q.video_id,
+          video_title: q.video_title || "Unknown Track",
+          player_nickname: state.players[q.player_id]?.nickname || "Unknown",
+          votes: q.votes ? Object.values(q.votes) : [],
+          status: q.status as "PLAYED" | "SKIPPED",
+        }));
+
+      saveSession({
+        roomCode: room.code,
+        songs,
+        playerCount: Object.keys(state.players).length,
+        endedAt: Date.now(),
+        role: "player",
+      });
+    }
+    
+    // Reset the ref when status changes away from FINISHED
+    if (room.status !== "FINISHED") {
+      sessionSavedRef.current = false;
+    }
+  }, [room.status, room.code, state.queue_items, state.players]);
+
+  if (!roomId || !peerId) {
     return (
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
-        <Loader2 className="animate-spin" size={32} />
+      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-white p-6">
+        <div className="max-w-sm w-full text-center space-y-6">
+          <div className="inline-block p-5 rounded-full bg-red-500/10 border border-red-500/30">
+            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-500">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold">{language === "de" ? "Parameter fehlen" : "Missing Parameters"}</h2>
+            <p className="text-neutral-500 text-sm">
+              {language === "de" 
+                ? "Die Verbindung wurde unterbrochen. Bitte tritt der Session erneut bei."
+                : "The connection was lost. Please rejoin the session."}
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <a 
+              href="/"
+              className="px-6 py-3 rounded-xl bg-neutral-800 text-white font-medium hover:bg-neutral-700 transition-colors flex items-center justify-center space-x-2"
+            >
+              <Home size={18} />
+              <span>{language === "de" ? "Startseite" : "Home"}</span>
+            </a>
+            <a 
+              href="/join"
+              className="px-6 py-3 rounded-xl bg-indigo-500 text-white font-medium hover:bg-indigo-600 transition-colors flex items-center justify-center space-x-2"
+            >
+              <span>{language === "de" ? "Neu beitreten" : "Rejoin"}</span>
+            </a>
+          </div>
+        </div>
       </div>
     );
   }
 
-  if (error) {
-    return <div className="text-red-500 p-8">Error: {error.message}</div>;
+  // We don't have explicit loading state for "query", but we can check if room code is synced
+  if (!room.code || !isConnected) {
+    return (
+      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-white space-y-4">
+        <Loader2 className="animate-spin text-indigo-500" size={32} />
+        <p className="text-neutral-500 text-sm">Syncing party state...</p>
+      </div>
+    );
   }
 
-  if (!room || !player) {
-    return <div className="text-white p-8">Room or Player not found.</div>;
+  if (!player) {
+    return (
+      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-white p-6">
+        <div className="max-w-sm w-full text-center space-y-6">
+          <div className="inline-block p-5 rounded-full bg-yellow-500/10 border border-yellow-500/30">
+            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-yellow-500">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold">{language === "de" ? "Nicht mehr in der Session" : "No Longer in Session"}</h2>
+            <p className="text-neutral-500 text-sm">
+              {language === "de" 
+                ? "Du wurdest möglicherweise entfernt oder die Session wurde beendet."
+                : "You may have been removed or the session has ended."}
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <a 
+              href="/"
+              className="px-6 py-3 rounded-xl bg-neutral-800 text-white font-medium hover:bg-neutral-700 transition-colors flex items-center justify-center space-x-2"
+            >
+              <Home size={18} />
+              <span>{language === "de" ? "Startseite" : "Home"}</span>
+            </a>
+            <button 
+              onClick={() => {
+                if (urlRoomId) {
+                  setRoomId(urlRoomId);
+                  window.location.reload();
+                } else {
+                  window.location.href = "/join";
+                }
+              }}
+              className="px-6 py-3 rounded-xl bg-indigo-500 text-white font-medium hover:bg-indigo-600 transition-colors flex items-center justify-center space-x-2"
+            >
+              <span>{language === "de" ? "Erneut beitreten" : "Try Rejoining"}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const commitVote = () => {
       if (!activeQueueItem) return;
-      const currentVotes = activeQueueItem.votes || {};
-      const newVotes = { ...currentVotes, [player.id]: localVote };
-      db.transact(db.tx.queue_items[activeQueueItem.id].update({ votes: newVotes }));
+      updateState(doc => {
+          const item = doc.queue_items[activeQueueItem.id];
+          if (item) {
+              if (!item.votes) item.votes = {};
+              item.votes[peerId] = localVote;
+          }
+      });
+  };
+
+  const commitPreviousVote = () => {
+      if (!previousQueueItem) return;
+      updateState(doc => {
+          const item = doc.queue_items[previousQueueItem.id];
+          if (item) {
+              if (!item.votes) item.votes = {};
+              item.votes[peerId] = localPrevVote;
+          }
+      });
   };
 
   const handleQueue = (startTime: number) => {
     if (!videoData) return;
 
-    const queueId = id();
-    db.transact(
-        db.tx.queue_items[queueId].update({
+    const queueId = crypto.randomUUID();
+    updateState(doc => {
+        doc.queue_items[queueId] = {
+            id: queueId,
             video_id: videoData.id,
             video_title: videoData.title,
             highlight_start: startTime,
             status: "PENDING",
             created_at: Date.now(),
-        })
-        .link({ room: roomId, player: playerId })
-    );
+            player_id: peerId,
+            room_id: roomId,
+        };
+    });
     setStep("SUCCESS");
   };
 
@@ -117,17 +260,24 @@ function PlayContent() {
 
   const handleDeleteConfirm = () => {
       if (deleteItemId) {
-          db.transact(db.tx.queue_items[deleteItemId].delete());
+          updateState(doc => {
+              delete doc.queue_items[deleteItemId];
+          });
           setDeleteItem(null);
       }
   };
 
   const handleChangeName = (newName: string) => {
-      db.transact(db.tx.players[player.id].update({ nickname: newName }));
+      updateState(doc => {
+          if (doc.players[peerId]) {
+              doc.players[peerId].nickname = newName;
+          }
+      });
       setShowNameModal(false);
   };
 
   const handleQuitConfirm = () => {
+      setRoomId(""); // Disconnect
       window.location.href = "/";
   };
 
@@ -151,14 +301,14 @@ function PlayContent() {
   // Lobby View
   if (room.status === "LOBBY") {
     const handleStartParty = () => {
-      db.transact(db.tx.rooms[roomId].update({ 
-        status: "PLAYING", 
-        playback_started_at: Date.now() 
-      }));
+      updateState(doc => {
+          doc.room.status = "PLAYING";
+          doc.room.playback_started_at = Date.now();
+      });
     };
 
     const updateTimer = (sec: number) => {
-      db.transact(db.tx.rooms[roomId].update({ timer_duration: sec }));
+      updateState(doc => doc.room.timer_duration = sec);
     };
 
     return (
@@ -264,18 +414,44 @@ function PlayContent() {
                   </div>
                 </div>
                 <button 
-                  onClick={() => db.transact(db.tx.rooms[roomId].update({ auto_skip: (room as any).auto_skip === false }))}
+                  onClick={() => updateState(doc => doc.room.auto_skip = doc.room.auto_skip === false)}
                   className={`relative w-12 h-6 rounded-full transition-colors ${
-                    (room as any).auto_skip !== false 
+                    room.auto_skip !== false 
                       ? "bg-indigo-500" 
                       : "bg-neutral-700"
                   }`}
                 >
                   <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
-                    (room as any).auto_skip !== false 
+                    room.auto_skip !== false 
                       ? "translate-x-6" 
                       : "translate-x-0.5"
                   }`} />
+                </button>
+              </div>
+
+              {/* Allow Self Voting Toggle */}
+              <div className="flex items-center justify-between pt-3 border-t border-neutral-800">
+                <div className="flex flex-col">
+                    <span className="text-xs font-bold text-neutral-300">
+                        {language === "de" ? "Eigene Songs bewerten" : "Self-Voting"}
+                    </span>
+                    <span className="text-[10px] text-neutral-500">
+                        {language === "de" ? "Erlaubt DJs für ihre eigenen Songs zu stimmen" : "Allow DJs to vote for their own songs"}
+                    </span>
+                </div>
+                <button 
+                    onClick={() => updateState(doc => doc.room.allow_self_voting = !doc.room.allow_self_voting)}
+                    className={`relative w-12 h-6 rounded-full transition-colors ${
+                        room.allow_self_voting 
+                            ? "bg-indigo-500" 
+                            : "bg-neutral-700"
+                    }`}
+                >
+                    <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                        room.allow_self_voting 
+                            ? "translate-x-6" 
+                            : "translate-x-0.5"
+                    }`} />
                 </button>
               </div>
 
@@ -318,7 +494,7 @@ function PlayContent() {
             <Edit2 size={12} className="opacity-50" />
           </div>
         </header>
-        <SummaryView room={room as any} />
+        <SummaryView />
         <ConfirmationModal 
             isOpen={showQuitModal}
             onCancel={() => setShowQuitModal(false)}
@@ -385,8 +561,25 @@ function PlayContent() {
           </div>
         )}
 
-        {/* Voting UI - Only when song is playing */}
-        {activeQueueItem && room.status !== "PAUSED" && (
+        {/* Skip My Song Control (When Playing) */}
+        {isMyTurn && activeQueueItem && room.status !== "PAUSED" && (
+             <div className="bg-neutral-900/80 p-4 rounded-2xl flex flex-col items-center space-y-3 border border-indigo-500/30 animate-in fade-in">
+                 <div className="text-center">
+                    <div className="text-[10px] uppercase tracking-widest text-indigo-400 font-bold mb-1">{t("nowSpinning")}</div>
+                    <div className="text-sm font-bold text-white max-w-[250px] truncate">{activeQueueItem.video_title || t("unknownTrack")}</div>
+                 </div>
+                 <button 
+                    onClick={handleSkip}
+                    className="w-full py-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-bold text-sm flex items-center justify-center space-x-2 transition-all border border-neutral-700"
+                 >
+                    <SkipForward size={16} />
+                    <span>{language === "de" ? "Meinen Song überspringen" : "Skip My Song"}</span>
+                 </button>
+             </div>
+        )}
+
+        {/* Voting UI - Shown if not my turn OR if self-voting is allowed */}
+        {activeQueueItem && room.status !== "PAUSED" && (!isMyTurn || room.allow_self_voting) && (
             <div className="bg-neutral-900/80 p-4 rounded-2xl flex flex-col space-y-4 border border-neutral-800 animate-in slide-in-from-top-2">
                 <div className="flex items-center justify-between">
                     <div className="flex flex-col overflow-hidden mr-4">
@@ -418,6 +611,40 @@ function PlayContent() {
                     <ThumbsUp 
                         size={20} 
                         className={`transition-colors ${localVote > 75 ? "text-green-500 fill-current" : "text-neutral-600"}`} 
+                    />
+                </div>
+            </div>
+        )}
+
+        {/* Previous Song Voting - If missed */}
+        {previousQueueItem && (!previousQueueItem.votes?.[peerId]) && (previousQueueItem.player_id !== peerId || room.allow_self_voting) && (
+            <div className="bg-neutral-900/50 p-3 rounded-2xl flex flex-col space-y-2 border border-neutral-800 animate-in fade-in mt-2">
+                <div className="flex items-center justify-between">
+                     <span className="text-[10px] uppercase tracking-widest text-neutral-500 font-bold">
+                        {language === "de" ? "Letzten Song bewerten" : "Rate Last Song"}
+                     </span>
+                     <span className="text-xs font-bold truncate text-white max-w-[150px]">{previousQueueItem.video_title}</span>
+                </div>
+                <div className="flex items-center space-x-3">
+                    <ThumbsDown 
+                        size={16} 
+                        className={`transition-colors ${localPrevVote < 25 ? "text-red-500 fill-current" : "text-neutral-600"}`} 
+                    />
+                    <div className="flex-1 relative h-4 flex items-center">
+                        <div className="absolute inset-0 h-1.5 bg-gradient-to-r from-red-900 via-neutral-700 to-green-900 rounded-full my-auto" />
+                        <Slider 
+                            min={0}
+                            max={100}
+                            value={localPrevVote}
+                            onChange={(e) => setLocalPrevVote(Number(e.target.value))}
+                            onMouseUp={commitPreviousVote}
+                            onTouchEnd={commitPreviousVote}
+                            className="relative z-10"
+                        />
+                    </div>
+                    <ThumbsUp 
+                        size={16} 
+                        className={`transition-colors ${localPrevVote > 75 ? "text-green-500 fill-current" : "text-neutral-600"}`} 
                     />
                 </div>
             </div>
@@ -521,7 +748,7 @@ function PlayContent() {
 
         {/* VIP Controls */}
         {isVip && (
-            <VIPControls room={room as any} queueItems={room.queue_items} />
+            <VIPControls room={room} players={Object.values(state.players)} queueItems={Object.values(state.queue_items)} />
         )}
     </div>
   );

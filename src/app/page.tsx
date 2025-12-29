@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Disc, Smartphone, Monitor, Languages } from "lucide-react";
+import { Disc, Smartphone, Monitor, Languages, History } from "lucide-react";
 import { useI18n } from "@/components/LanguageProvider";
 
 export default function Home() {
@@ -44,7 +44,7 @@ export default function Home() {
         <div className="w-full space-y-4">
           <Link
             href="/host"
-            className="group w-full flex items-center justify-between p-6 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-indigo-500/50 hover:bg-neutral-800 transition-all duration-300"
+            className="group w-full flex items-center justify-between p-6 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-indigo-500/50 hover:bg-neutral-800 transition-all duration-300 outline-none focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
           >
             <div className="flex items-center space-x-4">
               <div className="p-3 rounded-full bg-indigo-500/10 group-hover:bg-indigo-500/20 transition-colors">
@@ -60,7 +60,7 @@ export default function Home() {
 
           <Link
             href="/join"
-            className="group w-full flex items-center justify-between p-6 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-purple-500/50 hover:bg-neutral-800 transition-all duration-300"
+            className="group w-full flex items-center justify-between p-6 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-purple-500/50 hover:bg-neutral-800 transition-all duration-300 outline-none focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/50"
           >
             <div className="flex items-center space-x-4">
               <div className="p-3 rounded-full bg-purple-500/10 group-hover:bg-purple-500/20 transition-colors">
@@ -73,11 +73,30 @@ export default function Home() {
             </div>
             <div className="text-neutral-600 group-hover:text-purple-400 transition-colors">→</div>
           </Link>
+
+          <Link
+            href="/history"
+            className="group w-full flex items-center justify-between p-4 rounded-xl bg-neutral-900/50 border border-neutral-800/50 hover:border-neutral-700 hover:bg-neutral-900 transition-all duration-300 outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:ring-2 focus-visible:ring-neutral-700"
+          >
+            <div className="flex items-center space-x-3">
+              <div className="p-2 rounded-full bg-neutral-800 group-hover:bg-neutral-700 transition-colors">
+                <History size={18} className="text-neutral-400" />
+              </div>
+              <div className="text-left">
+                <h3 className="font-medium text-sm text-neutral-300">{language === "de" ? "Session-Verlauf" : "Session History"}</h3>
+                <p className="text-neutral-600 text-xs">{language === "de" ? "Vergangene Sessions ansehen" : "View past sessions"}</p>
+              </div>
+            </div>
+            <div className="text-neutral-700 group-hover:text-neutral-500 transition-colors">→</div>
+          </Link>
         </div>
       </div>
       
       <div className="absolute bottom-8 text-neutral-600 text-sm">
         {t("poweredBy")}
+        <a href="https://automerge.org/" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-400 transition-colors">Automerge</a>
+        {" + "}
+        <a href="https://oxism.com/trystero/2" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-400 transition-colors">Trystero</a>
       </div>
     </div>
   );

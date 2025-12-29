@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { db } from "@/lib/db";
-import { id } from "@instantdb/react";
+import { useGameStore } from "@/lib/game-context";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Loader2, Music2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -10,11 +9,15 @@ import { cn } from "@/lib/utils";
 function JoinContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { state, updateState, setRoomId, peerId, isConnected, peers } = useGameStore();
+
   const [code, setCode] = useState("");
-// ... rest of the component
   const [nickname, setNickname] = useState("");
   const [isJoining, setIsJoining] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [hasTriedJoin, setHasTriedJoin] = useState(false);
+  const [connectionTimedOut, setConnectionTimedOut] = useState(false);
+  const [waitingForHost, setWaitingForHost] = useState(false);
 
   // Auto-fill code from URL if present
   useEffect(() => {
@@ -24,27 +27,66 @@ function JoinContent() {
     }
   }, [searchParams]);
 
-  // Only query when code is 4 chars to save resources/avoid noise
-  const shouldQuery = code.length === 4;
-  const { data, isLoading } = db.useQuery(
-    shouldQuery
-      ? {
-          rooms: {
-            $: {
-              where: { code: code.toUpperCase() },
-            },
-          },
-        }
-      : null
-  );
+  // Try to connect when code is 4 chars
+  useEffect(() => {
+      if (code.length === 4) {
+          setRoomId(code);
+          setHasTriedJoin(true);
+          setConnectionTimedOut(false);
+          setWaitingForHost(false);
+      } else {
+          setRoomId(""); // Disconnect if invalid code
+          setHasTriedJoin(false);
+          setConnectionTimedOut(false);
+          setWaitingForHost(false);
+      }
+  }, [code, setRoomId]);
 
-  const isValidRoom = data?.rooms && data.rooms.length > 0;
-  const room = data?.rooms[0];
+  // Track when we're connected but no peers (waiting for host)
+  useEffect(() => {
+    if (hasTriedJoin && isConnected && peers.length === 0 && state.room.code !== code) {
+      setWaitingForHost(true);
+    } else {
+      setWaitingForHost(false);
+    }
+  }, [hasTriedJoin, isConnected, peers.length, state.room.code, code]);
+
+  // Timeout mechanism: if room not found after 15 seconds, show error
+  useEffect(() => {
+    if (!hasTriedJoin || !isConnected) {
+      return; // No timeout needed
+    }
+    
+    // If we already found the room, no timeout needed
+    if (state.room.code === code) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      // If we're still connected but haven't received room data matching our code,
+      // the room likely doesn't exist (no host peer in that room)
+      if (state.room.code !== code) {
+        setConnectionTimedOut(true);
+      }
+    }, 15000); // 15 second timeout
+
+    return () => clearTimeout(timeoutId);
+  }, [hasTriedJoin, isConnected, state.room.code, code]);
+
+  // Room is only valid if we have peers AND state shows matching room code
+  // This ensures we actually connected to a host, not just an empty room
+  const hasHost = peers.length > 0;
+  const roomStateMatches = state.room.code === code;
+  const isValidRoom = code.length === 4 && roomStateMatches && hasHost;
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isValidRoom || !room) {
-      setErrorMsg("Room not found. Check the code on the TV.");
+    if (!isValidRoom) {
+      if (waitingForHost || (isConnected && !hasHost)) {
+        setErrorMsg("No host found. Make sure the TV is showing this room code.");
+      } else {
+        setErrorMsg("Room not found. Check the code on the TV.");
+      }
       return;
     }
     if (!nickname.trim()) {
@@ -53,20 +95,29 @@ function JoinContent() {
     }
 
     setIsJoining(true);
-    const playerId = id();
+    
+    // Create player profile
+    // We use the persistent peerId for identification
+    const playerId = peerId;
 
     try {
-      await db.transact([
-        db.tx.players[playerId].update({
-          nickname: nickname,
-          avatar_seed: nickname, // Simple seed for now
-          joined_at: Date.now(),
-          is_online: true,
-        }).link({ room: room.id }),
-      ]);
+      updateState(doc => {
+          doc.players[playerId] = {
+              id: playerId,
+              nickname: nickname,
+              avatar_seed: nickname,
+              joined_at: Date.now(),
+              is_online: true,
+          };
+      });
 
       // Navigate to play area
-      router.push(`/play?roomId=${room.id}&playerId=${playerId}`);
+      // We don't need params in URL necessarily if we use context, 
+      // but keeping them for consistency with original design or deep linking (though P2P deep link is harder)
+      // Actually, passing them helps PlayPage know "who am I" if we didn't have global store,
+      // but with global store we have `peerId`.
+      // We will keep params for now to match PlayPage expectation (which we will refactor next).
+      router.push(`/play?roomId=${state.room.id}&playerId=${playerId}`);
     } catch (err) {
       console.error(err);
       setErrorMsg("Failed to join. Try again.");
@@ -101,14 +152,38 @@ function JoinContent() {
               placeholder="ABCD"
               className={cn(
                 "w-full bg-neutral-800 border-2 border-transparent focus:border-indigo-500 rounded-xl p-4 text-center text-3xl font-mono tracking-[0.5em] uppercase outline-none transition-all placeholder:tracking-normal placeholder:font-sans placeholder:text-neutral-600",
-                shouldQuery && !isValidRoom && !isLoading && "border-red-500/50"
+                code.length === 4 && !isValidRoom && hasTriedJoin && isConnected && !connectionTimedOut && !waitingForHost && "border-yellow-500/50",
+                code.length === 4 && waitingForHost && !connectionTimedOut && "border-orange-500/50",
+                code.length === 4 && connectionTimedOut && "border-red-500/50",
+                isValidRoom && "border-green-500/50"
               )}
             />
-            {shouldQuery && !isValidRoom && !isLoading && (
-              <p className="text-red-400 text-xs text-center">Room not found</p>
+            {/* Searching state - just connected, looking for peers */}
+            {code.length === 4 && !isValidRoom && isConnected && !connectionTimedOut && !waitingForHost && !roomStateMatches && (
+              <p className="text-yellow-400 text-xs text-center animate-in fade-in flex items-center justify-center gap-2">
+                <Loader2 className="animate-spin" size={12} />
+                Connecting to room...
+              </p>
             )}
-            {shouldQuery && isValidRoom && (
-              <p className="text-green-400 text-xs text-center">Room found!</p>
+            {/* Waiting for host - connected to room but no peers yet */}
+            {code.length === 4 && waitingForHost && !connectionTimedOut && (
+              <p className="text-orange-400 text-xs text-center animate-in fade-in flex items-center justify-center gap-2">
+                <Loader2 className="animate-spin" size={12} />
+                Waiting for host... Make sure the TV is showing this code.
+              </p>
+            )}
+            {/* Timeout - no host found after waiting */}
+            {connectionTimedOut && (
+              <p className="text-red-400 text-xs text-center animate-in fade-in">
+                No host found. Make sure the TV is showing this room code.
+              </p>
+            )}
+            {/* Success - found room and host */}
+            {isValidRoom && (
+              <p className="text-green-400 text-xs text-center animate-in fade-in flex items-center justify-center gap-2">
+                <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                Connected to host!
+              </p>
             )}
           </div>
 

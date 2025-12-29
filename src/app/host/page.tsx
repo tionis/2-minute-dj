@@ -1,24 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { db } from "@/lib/db";
+import { useEffect, useState, useRef } from "react";
+import { useGameStore } from "@/lib/game-context";
 import { generateRoomCode } from "@/lib/utils";
-import { id } from "@instantdb/react";
 import { Copy, Users, Play, Loader2, X, Crown, LogOut, Languages, Clock, SkipForward } from "lucide-react";
 import GameView from "@/components/host/GameView";
 import SummaryView from "@/components/host/SummaryView";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { QRCodeSVG } from "qrcode.react";
 import { useI18n } from "@/components/LanguageProvider";
+import { saveSession, SessionSong } from "@/lib/session-history";
 
 export default function HostPage() {
   const { t, language, setLanguage } = useI18n();
-  const [roomId, setRoomId] = useState<string | null>(null);
-  const [roomCode, setRoomCode] = useState<string | null>(null);
+  const { state, updateState, roomId, setRoomId } = useGameStore();
+  
   const [origin, setOrigin] = useState("");
   const [showQuitModal, setShowQuitModal] = useState(false);
   const [kickPlayerId, setKickPlayerId] = useState<string | null>(null);
   const [kickPlayerName, setKickPlayerName] = useState("");
+
+  const room = state.room;
+  // Convert Record to Array and sort
+  const players = Object.values(state.players || {}).sort((a, b) => a.joined_at - b.joined_at);
 
   const handleKickClick = (playerId: string, name: string) => {
       setKickPlayerId(playerId);
@@ -27,13 +31,22 @@ export default function HostPage() {
 
   const handleKickConfirm = () => {
       if (kickPlayerId) {
-          db.transact(db.tx.players[kickPlayerId].delete());
+          updateState(doc => {
+              delete doc.players[kickPlayerId];
+              // Also remove their queue items?
+              // In InstantDB this might cascade, here we should do it manually if we want clean state.
+              // For now, keeping it simple.
+          });
           setKickPlayerId(null);
       }
   };
 
-  const handleToggleVIP = (player: any) => {
-      db.transact(db.tx.players[player.id].update({ is_vip: !player.is_vip }));
+  const handleToggleVIP = (playerId: string) => {
+      updateState(doc => {
+          if (doc.players[playerId]) {
+              doc.players[playerId].is_vip = !doc.players[playerId].is_vip;
+          }
+      });
   };
 
   // Create room on mount or restore from local storage
@@ -44,79 +57,111 @@ export default function HostPage() {
     const savedRoomCode = localStorage.getItem("2mdj_host_roomCode");
 
     if (savedRoomId && savedRoomCode) {
-        setRoomId(savedRoomId);
-        setRoomCode(savedRoomCode);
+        if (roomId !== savedRoomId) {
+            setRoomId(savedRoomId);
+        }
+
+        // If we have credentials but state is empty (migration or cleared cache),
+        // re-initialize the room state so we don't get stuck loading.
+        if (!room.code) {
+            updateState(doc => {
+                doc.room = {
+                    id: savedRoomId,
+                    code: savedRoomCode,
+                    status: "LOBBY",
+                    created_at: Date.now(),
+                };
+                if (!doc.players) doc.players = {};
+                if (!doc.queue_items) doc.queue_items = {};
+            });
+        }
         return;
     }
 
     if (roomId) return;
 
-    const newRoomId = id();
     const code = generateRoomCode();
-    
-    setRoomId(newRoomId);
-    setRoomCode(code);
+    const newRoomId = code; // Use code as ID for P2P discovery
     
     // Save to local storage
     localStorage.setItem("2mdj_host_roomId", newRoomId);
     localStorage.setItem("2mdj_host_roomCode", code);
 
-    db.transact(
-      db.tx.rooms[newRoomId].update({
-        code: code,
-        status: "LOBBY",
-        created_at: Date.now(),
-      })
-    );
-  }, []);
+    setRoomId(newRoomId);
 
-  // Query room, players, and queue
-  const { isLoading, error, data } = db.useQuery(
-    roomId
-      ? {
-          rooms: {
-            $: {
-              where: { id: roomId },
-            },
-            players: {},
-            queue_items: {
-                player: {},
-            },
-          },
-        }
-      : null
-  );
+    // Initialize state
+    updateState(doc => {
+        doc.room = {
+            id: newRoomId,
+            code: code,
+            status: "LOBBY",
+            created_at: Date.now(),
+        };
+        doc.players = {};
+        doc.queue_items = {};
+    });
+  }, [roomId, setRoomId, updateState]);
 
-  if (isLoading || !roomId) {
-    return (
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
-        <Loader2 className="animate-spin" size={32} />
-      </div>
-    );
-  }
+  // Track if we've already saved this session to prevent duplicates
+  const sessionSavedRef = useRef(false);
 
-  if (error) {
-    return (
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-red-400">
-        Error: {error.message}
-      </div>
-    );
-  }
+  // Save session to history when game ends
+  useEffect(() => {
+    if (room.status === "FINISHED" && !sessionSavedRef.current && room.code) {
+      sessionSavedRef.current = true;
+      
+      const songs: SessionSong[] = Object.values(state.queue_items)
+        .filter(q => q.status === "PLAYED" || q.status === "SKIPPED")
+        .sort((a, b) => a.created_at - b.created_at)
+        .map(q => ({
+          id: q.id,
+          video_id: q.video_id,
+          video_title: q.video_title || "Unknown Track",
+          player_nickname: state.players[q.player_id]?.nickname || "Unknown",
+          votes: q.votes ? Object.values(q.votes) : [],
+          status: q.status as "PLAYED" | "SKIPPED",
+        }));
 
-  const room = data?.rooms[0];
-  const players = room?.players || [];
+      saveSession({
+        roomCode: room.code,
+        songs,
+        playerCount: Object.keys(state.players).length,
+        endedAt: Date.now(),
+        role: "host",
+      });
+    }
+    
+    // Reset the ref when status changes away from FINISHED
+    if (room.status !== "FINISHED") {
+      sessionSavedRef.current = false;
+    }
+  }, [room.status, room.code, state.queue_items, state.players]);
 
   const handleQuitConfirm = () => {
       localStorage.removeItem("2mdj_host_roomId");
       localStorage.removeItem("2mdj_host_roomCode");
+      // Clear store persistence
+      localStorage.removeItem("2mdj_doc_backup");
       window.location.href = "/";
   };
 
   const startGame = () => {
-    if (!roomId) return;
-    db.transact(
-      db.tx.rooms[roomId].update({ status: "PLAYING", playback_started_at: Date.now() })
-    );
+    updateState(doc => {
+        doc.room.status = "PLAYING";
+        doc.room.playback_started_at = Date.now();
+    });
+  };
+
+  const updateTimer = (sec: number) => {
+      updateState(doc => {
+          doc.room.timer_duration = sec;
+      });
+  };
+
+  const toggleAutoSkip = () => {
+      updateState(doc => {
+          doc.room.auto_skip = doc.room.auto_skip === false; // toggle logic inverted in UI
+      });
   };
 
   const renderLangSwitcher = () => (
@@ -136,7 +181,16 @@ export default function HostPage() {
     </div>
   );
 
-  if (room?.status === "PLAYING" || room?.status === "PAUSED") {
+  // Loading state
+  if (!room.code) {
+    return (
+      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
+        <Loader2 className="animate-spin" size={32} />
+      </div>
+    );
+  }
+
+  if (room.status === "PLAYING" || room.status === "PAUSED") {
     return (
       <div className="h-screen bg-neutral-950 text-white flex flex-col items-center justify-center p-6 relative tv-scale">
         <div className="absolute top-6 left-6 z-50 flex items-center space-x-4">
@@ -150,7 +204,8 @@ export default function HostPage() {
             {renderLangSwitcher()}
         </div>
         <div className="w-full max-w-7xl h-full flex flex-col justify-center">
-            <GameView room={room as any} />
+            {/* We pass the room state to GameView, but GameView also uses store internally now */}
+            <GameView />
         </div>
         <ConfirmationModal 
             isOpen={showQuitModal}
@@ -165,7 +220,7 @@ export default function HostPage() {
     );
   }
 
-  if (room?.status === "FINISHED") {
+  if (room.status === "FINISHED") {
     return (
       <div className="min-h-screen bg-neutral-950 text-white p-12 overflow-y-auto relative">
         <div className="absolute top-6 left-6 z-50 flex items-center space-x-4">
@@ -179,7 +234,7 @@ export default function HostPage() {
             </div>
             {renderLangSwitcher()}
         </div>
-        <SummaryView room={room as any} />
+        <SummaryView />
         <ConfirmationModal 
             isOpen={showQuitModal}
             onCancel={() => setShowQuitModal(false)}
@@ -237,10 +292,10 @@ export default function HostPage() {
                 <h1 className="text-4xl font-bold">{origin.replace(/^https?:\/\//, "")}</h1>
             </div>
 
-            <div className="relative group cursor-pointer text-center lg:text-left" onClick={() => navigator.clipboard.writeText(roomCode || "")}>
+            <div className="relative group cursor-pointer text-center lg:text-left" onClick={() => navigator.clipboard.writeText(room.code || "")}>
                 <h2 className="text-neutral-500 font-bold uppercase text-xs tracking-[0.3em] mb-2">{t("roomCode")}</h2>
                 <h1 className="text-9xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-br from-indigo-400 to-purple-400 select-none leading-none">
-                {roomCode}
+                {room.code}
                 </h1>
             </div>
 
@@ -260,7 +315,7 @@ export default function HostPage() {
                         {[60, 90, 120, 180].map((sec) => (
                             <button
                                 key={sec}
-                                onClick={() => db.transact(db.tx.rooms[roomId!].update({ timer_duration: sec }))}
+                                onClick={() => updateTimer(sec)}
                                 className={`py-2 rounded-lg font-bold text-xs border transition-all ${
                                     (room?.timer_duration || 120) === sec 
                                         ? "border-indigo-500 bg-indigo-500/20 text-white" 
@@ -287,15 +342,15 @@ export default function HostPage() {
                         </div>
                     </div>
                     <button 
-                        onClick={() => db.transact(db.tx.rooms[roomId!].update({ auto_skip: (room as any)?.auto_skip === false }))}
+                        onClick={toggleAutoSkip}
                         className={`relative w-12 h-6 rounded-full transition-colors ${
-                            (room as any)?.auto_skip !== false 
+                            room?.auto_skip !== false 
                                 ? "bg-indigo-500" 
                                 : "bg-neutral-700"
                         }`}
                     >
                         <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
-                            (room as any)?.auto_skip !== false 
+                            room?.auto_skip !== false 
                                 ? "translate-x-6" 
                                 : "translate-x-0.5"
                         }`} />
@@ -318,7 +373,7 @@ export default function HostPage() {
         <div className="flex flex-col items-center space-y-8 bg-neutral-900/50 p-10 rounded-[3rem] border border-neutral-800">
             <div className="bg-white p-6 rounded-[2rem] shadow-[0_0_50px_rgba(79,70,229,0.2)]">
                 <QRCodeSVG 
-                    value={`${origin}/join?code=${roomCode}`}
+                    value={`${origin}/join?code=${room.code}`}
                     size={200}
                     level="H"
                     includeMargin={false}
@@ -350,7 +405,7 @@ export default function HostPage() {
                         <div className="absolute -top-2 -right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             {/* VIP Button */}
                             <button 
-                                onClick={() => handleToggleVIP(player)}
+                                onClick={() => handleToggleVIP(player.id)}
                                 className={`p-1 rounded-full hover:scale-110 transition-transform ${player.is_vip ? "bg-yellow-500 text-black" : "bg-neutral-700 text-neutral-400 hover:bg-yellow-500 hover:text-black"}`}
                                 title={t("toggleVip")}
                             >

@@ -7,7 +7,7 @@ export const translations = {
     hostDesc: "Use this device as the TV",
     joinGame: "Join Game",
     joinDesc: "Use your phone to play",
-    poweredBy: "Powered by InstantDB",
+    poweredBy: "Powered by ",
     
     // Host
     joinAt: "Join at",
@@ -36,6 +36,7 @@ export const translations = {
     previewSong: "Preview Song",
     clipBestPart: "Clip the Best Part",
     selectHighlight: "Select the 2-minute highlight.",
+    highlight: "Highlight",
     addToQueue: "Add to Queue",
     back: "Back",
     queued: "Queued!",
@@ -65,7 +66,7 @@ export const translations = {
     hostDesc: "Dieses Gerät als TV nutzen",
     joinGame: "Spiel beitreten",
     joinDesc: "Nutze dein Handy zum Spielen",
-    poweredBy: "Betrieben von InstantDB",
+    poweredBy: "Betrieben von ",
     
     // Host
     joinAt: "Beitreten unter",
@@ -94,6 +95,7 @@ export const translations = {
     previewSong: "Vorschau",
     clipBestPart: "Besten Teil wählen",
     selectHighlight: "Wähle das 2-Minuten Highlight.",
+    highlight: "Ausschnitt",
     addToQueue: "In die Warteschlange",
     back: "Zurück",
     queued: "Eingereiht!",

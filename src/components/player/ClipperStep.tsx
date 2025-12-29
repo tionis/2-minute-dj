@@ -123,6 +123,7 @@ export default function ClipperStep({ videoId, timerDuration = 120, onQueue, onB
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newStart = Number(e.target.value);
     setStartTime(newStart);
+    setCurrentTime(newStart); // Update preview time immediately
     // Real-time seeking
     if (playerRef.current?.seekTo) {
       playerRef.current.seekTo(newStart, true);
@@ -177,8 +178,11 @@ export default function ClipperStep({ videoId, timerDuration = 120, onQueue, onB
         )}
         
         {/* Time display overlay */}
-        <div className="absolute bottom-2 left-2 bg-black/70 px-2 py-1 rounded text-xs font-mono text-white/80 pointer-events-none">
-          {formatTime(currentTime)} / {formatTime(duration)}
+        <div className="absolute bottom-2 left-2 bg-black/70 px-2 py-1 rounded text-xs font-mono text-white/80 pointer-events-none flex flex-col">
+          <span>{formatTime(currentTime)} / {formatTime(duration)}</span>
+          <span className="text-indigo-400 text-[10px]">
+            {t("highlight")}: {formatTime(startTime)} - {formatTime(startTime + windowSize)}
+          </span>
         </div>
         
         {/* Helper overlay to show it's a preview */}

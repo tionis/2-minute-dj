@@ -20,7 +20,8 @@ A "second-screen" party game where users join a session hosted on a TV/Laptop us
 
 - **Framework:** Next.js (React, TypeScript)
 - **Styling:** Tailwind CSS
-- **Database/Real-time:** InstantDB
+- **State Management:** Automerge (CRDT)
+- **Real-time:** Trystero (WebRTC)
 - **Media:** YouTube IFrame Player API
 - **Deployment:** Vercel
 
@@ -37,26 +38,13 @@ A "second-screen" party game where users join a session hosted on a TV/Laptop us
     npm install
     ```
 
-3.  **Environment Setup:**
-    - Create a `.env.local` file in the root directory.
-    - Add your InstantDB App ID:
-      ```env
-      NEXT_PUBLIC_INSTANT_APP_ID=your_app_id_here
-      ```
-
-4.  **Run the development server:**
+3.  **Run the development server:**
     ```bash
     npm run dev
     ```
 
-5.  **Open the app:**
+4.  **Open the app:**
     - Navigate to `http://localhost:3000` in your browser.
-
-## InstantDB Management
-
-- **Push Schema:** `npx instant-cli push schema`
-- **Push Permissions:** `npx instant-cli push perms`
-- **Pull Changes:** `npx instant-cli pull`
 
 ## Contributing
 
