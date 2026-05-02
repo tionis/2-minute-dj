@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { Loader2, Music, User, SkipForward, Clock, Play, Settings, X, Crown, Pause, Plus } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Loader2, Music, User, SkipForward, Clock, Play, Settings, X, Crown, Pause, Plus, ArrowRight } from "lucide-react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useI18n } from "@/components/LanguageProvider";
 import HypeMeter from "./HypeMeter";
-import { computeAdvanceToNextSong } from "@/lib/utils";
+import { computeAdvanceToNextSong, getPlayerOrder } from "@/lib/utils";
 import db from "@/lib/db";
 
 export default function GameView({ roomId }: { roomId: string }) {
@@ -31,9 +31,37 @@ export default function GameView({ roomId }: { roomId: string }) {
   const [kickPlayerId, setKickPlayerId] = useState<string | null>(null);
   const [kickPlayerName, setKickPlayerName] = useState("");
   const [iframeKey, setIframeKey] = useState(0);
+  const [ytApiReady, setYtApiReady] = useState(false);
 
   const stateRef = useRef<any>({ room, queueItems, players });
   const isEndingRef = useRef(false);
+  const ytPlayerRef = useRef<any>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  const onYTReady = useCallback(() => {
+    if (iframeRef.current && iframeRef.current.contentWindow) {
+      try {
+        ytPlayerRef.current = new (window as any).YT.Player(iframeRef.current, {
+          events: {
+            onReady: () => setIsPlayerReady(true),
+          },
+        });
+      } catch {
+        setIsPlayerReady(true);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!(window as any).YT) {
+      const tag = document.createElement("script");
+      tag.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(tag);
+      (window as any).onYouTubeIframeAPIReady = () => setYtApiReady(true);
+    } else {
+      setYtApiReady(true);
+    }
+  }, []);
 
   useEffect(() => {
     stateRef.current = { room, queueItems, players };
@@ -45,6 +73,23 @@ export default function GameView({ roomId }: { roomId: string }) {
     const timer = setTimeout(() => setIsPlayerReady(true), 5000);
     return () => clearTimeout(timer);
   }, [room?.currentVideoId]);
+
+  useEffect(() => {
+    if (ytApiReady && iframeRef.current && !(window as any).YT?.Player) {
+      return;
+    }
+    if (ytApiReady && iframeRef.current && (window as any).YT?.Player) {
+      try {
+        ytPlayerRef.current = new (window as any).YT.Player(iframeRef.current, {
+          events: {
+            onReady: () => setIsPlayerReady(true),
+          },
+        });
+      } catch {
+        setIsPlayerReady(true);
+      }
+    }
+  }, [ytApiReady, iframeKey]);
 
   useEffect(() => {
     setIsEnding(false);
@@ -124,10 +169,23 @@ export default function GameView({ roomId }: { roomId: string }) {
     if (!room) return;
 
     if (room.status === "PLAYING") {
-      const elapsedSeconds = room.playbackStartedAt
-        ? Math.floor((Date.now() - room.playbackStartedAt) / 1000)
-        : 0;
-      const videoOffset = (room.currentStartTime || 0) + elapsedSeconds;
+      const player = ytPlayerRef.current;
+      let videoOffset: number | undefined;
+      if (player && typeof player.getCurrentTime === "function") {
+        try {
+          videoOffset = Math.floor(player.getCurrentTime());
+        } catch {}
+      }
+      if (!videoOffset && videoOffset !== 0) {
+        const elapsedSeconds = room.playbackStartedAt
+          ? Math.floor((Date.now() - room.playbackStartedAt) / 1000)
+          : 0;
+        videoOffset = (room.currentStartTime || 0) + elapsedSeconds;
+      }
+
+      if (player && typeof player.pauseVideo === "function") {
+        try { player.pauseVideo(); } catch {}
+      }
 
       db.transact(
         db.tx.rooms[roomId].update({
@@ -141,6 +199,7 @@ export default function GameView({ roomId }: { roomId: string }) {
         ? Date.now() - room.pausedAt
         : 0;
       const newStart = (room.playbackStartedAt || Date.now()) + pauseDuration;
+      const seekTo = room.currentVideoOffset ?? room.currentStartTime ?? 0;
 
       db.transact(
         db.tx.rooms[roomId].update({
@@ -150,7 +209,15 @@ export default function GameView({ roomId }: { roomId: string }) {
         })
       );
 
-      setIframeKey((prev) => prev + 1);
+      const player = ytPlayerRef.current;
+      if (player && typeof player.seekTo === "function" && typeof player.playVideo === "function") {
+        try {
+          player.seekTo(seekTo, true);
+          player.playVideo();
+        } catch {}
+      } else {
+        setIframeKey((prev) => prev + 1);
+      }
     }
   };
 
@@ -218,6 +285,62 @@ export default function GameView({ roomId }: { roomId: string }) {
         autoSkip: room.autoSkip === false ? null : false,
       })
     );
+  };
+
+  const forcePlayerTurn = (playerId: string) => {
+    if (!room) return;
+    const playerOrder = getPlayerOrder(players, room.playerOrder);
+    const idx = playerOrder.indexOf(playerId);
+    if (idx === -1) return;
+
+    const pendingForPlayer = queueItems.filter(
+      (q: any) => q.status === "PENDING" && q.playerId === playerId
+    );
+
+    const txns: any[] = [];
+
+    if (room.activeQueueItemId) {
+      const currentItem = queueItems.find(
+        (q: any) => q.id === room.activeQueueItemId
+      );
+      if (currentItem) {
+        txns.push(db.tx.queueItems[currentItem.id].update({ status: "PLAYED" }));
+      }
+    }
+
+    if (pendingForPlayer.length > 0) {
+      const nextItem = pendingForPlayer.sort(
+        (a: any, b: any) => a.createdAt - b.createdAt
+      )[0];
+      txns.push(
+        db.tx.rooms[roomId].update({
+          currentTurnIndex: idx,
+          activePlayerId: playerId,
+          activeQueueItemId: nextItem.id,
+          currentVideoId: nextItem.videoId,
+          currentStartTime: nextItem.highlightStart,
+          currentVideoOffset: nextItem.highlightStart,
+          playbackStartedAt: Date.now(),
+          previousQueueItemId: room.activeQueueItemId ?? null,
+        })
+      );
+    } else {
+      txns.push(
+        db.tx.rooms[roomId].update({
+          currentTurnIndex: idx,
+          activePlayerId: playerId,
+          activeQueueItemId: null,
+          currentVideoId: null,
+          currentStartTime: null,
+          currentVideoOffset: null,
+          playbackStartedAt: null,
+          previousQueueItemId: room.activeQueueItemId ?? null,
+        })
+      );
+    }
+
+    db.transact(txns);
+    setShowPlayers(false);
   };
 
   const activeQueueItem = queueItems.find(
@@ -379,6 +502,15 @@ export default function GameView({ roomId }: { roomId: string }) {
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
+                    {player.id !== room?.activePlayerId && (
+                      <button
+                        onClick={() => forcePlayerTurn(player.id)}
+                        className="p-2 rounded-xl border border-neutral-700 text-neutral-500 hover:text-indigo-500 hover:border-indigo-500 transition-colors"
+                        title={language === "de" ? "Diesen DJ drannehmen" : "Make this DJ current"}
+                      >
+                        <ArrowRight size={16} />
+                      </button>
+                    )}
                     <button
                       onClick={() =>
                         handleToggleVIP(player.id, player.isVip)
@@ -621,12 +753,17 @@ export default function GameView({ roomId }: { roomId: string }) {
         )}
 
         <iframe
+          ref={iframeRef}
           key={`${room.currentVideoId}-${iframeKey}`}
           className={`absolute inset-0 w-full h-full border-none transition-opacity ${room.status === "PAUSED" ? "opacity-50" : ""}`}
-          src={`https://www.youtube.com/embed/${room.currentVideoId}?autoplay=${room.status === "PLAYING" ? 1 : 0}&start=${room.currentVideoOffset || room.currentStartTime || 0}&controls=0&modestbranding=1&rel=0`}
+          src={`https://www.youtube.com/embed/${room.currentVideoId}?enablejsapi=1&autoplay=${room.status === "PLAYING" ? 1 : 0}&start=${room.currentVideoOffset || room.currentStartTime || 0}&controls=0&modestbranding=1&rel=0`}
           title="YouTube video player"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          onLoad={() => setIsPlayerReady(true)}
+          onLoad={() => {
+            if (!ytApiReady) {
+              setIsPlayerReady(true);
+            }
+          }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
 

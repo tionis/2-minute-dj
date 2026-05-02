@@ -1,10 +1,10 @@
 "use client";
 
-import { SkipForward, Pause, Play, Users, Clock, Trash2, Crown, Plus } from "lucide-react";
+import { SkipForward, Pause, Play, Users, Clock, Trash2, Crown, Plus, ArrowRight } from "lucide-react";
 import { useState } from "react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useI18n } from "@/components/LanguageProvider";
-import { computeAdvanceToNextSong } from "@/lib/utils";
+import { computeAdvanceToNextSong, getPlayerOrder } from "@/lib/utils";
 import db from "@/lib/db";
 
 interface VIPControlsProps {
@@ -37,10 +37,16 @@ export default function VIPControls({ room, players, queueItems, roomId }: VIPCo
 
   const togglePause = () => {
     if (room.status === "PLAYING") {
+      const elapsedSeconds = room.playbackStartedAt
+        ? Math.floor((Date.now() - room.playbackStartedAt) / 1000)
+        : 0;
+      const videoOffset = (room.currentStartTime || 0) + elapsedSeconds;
+
       db.transact(
         db.tx.rooms[roomId].update({
           status: "PAUSED",
           pausedAt: Date.now(),
+          currentVideoOffset: videoOffset,
         })
       );
     } else {
@@ -82,6 +88,61 @@ export default function VIPControls({ room, players, queueItems, roomId }: VIPCo
         playbackStartedAt: room.playbackStartedAt + seconds * 1000,
       })
     );
+  };
+
+  const forcePlayerTurn = (playerId: string) => {
+    if (!room) return;
+    const playerOrder = getPlayerOrder(players, room.playerOrder);
+    const idx = playerOrder.indexOf(playerId);
+    if (idx === -1) return;
+
+    const pendingForPlayer = queueItems.filter(
+      (q: any) => q.status === "PENDING" && q.playerId === playerId
+    );
+
+    const txns: any[] = [];
+
+    if (room.activeQueueItemId) {
+      const currentItem = queueItems.find(
+        (q: any) => q.id === room.activeQueueItemId
+      );
+      if (currentItem) {
+        txns.push(db.tx.queueItems[currentItem.id].update({ status: "PLAYED" }));
+      }
+    }
+
+    if (pendingForPlayer.length > 0) {
+      const nextItem = pendingForPlayer.sort(
+        (a: any, b: any) => a.createdAt - b.createdAt
+      )[0];
+      txns.push(
+        db.tx.rooms[roomId].update({
+          currentTurnIndex: idx,
+          activePlayerId: playerId,
+          activeQueueItemId: nextItem.id,
+          currentVideoId: nextItem.videoId,
+          currentStartTime: nextItem.highlightStart,
+          currentVideoOffset: nextItem.highlightStart,
+          playbackStartedAt: Date.now(),
+          previousQueueItemId: room.activeQueueItemId ?? null,
+        })
+      );
+    } else {
+      txns.push(
+        db.tx.rooms[roomId].update({
+          currentTurnIndex: idx,
+          activePlayerId: playerId,
+          activeQueueItemId: null,
+          currentVideoId: null,
+          currentStartTime: null,
+          currentVideoOffset: null,
+          playbackStartedAt: null,
+          previousQueueItemId: room.activeQueueItemId ?? null,
+        })
+      );
+    }
+
+    db.transact(txns);
   };
 
   return (
@@ -196,12 +257,23 @@ export default function VIPControls({ room, players, queueItems, roomId }: VIPCo
               className="flex items-center justify-between bg-neutral-800/50 p-2 rounded-lg"
             >
               <span className="text-sm font-medium truncate pl-1">{p.nickname}</span>
-              <button
-                onClick={() => kickPlayer(p.id, p.nickname)}
-                className="p-1.5 text-neutral-500 hover:text-red-500 transition-colors"
-              >
-                <Trash2 size={14} />
-              </button>
+              <div className="flex items-center space-x-1">
+                {p.id !== room.activePlayerId && (
+                  <button
+                    onClick={() => forcePlayerTurn(p.id)}
+                    className="p-1.5 text-neutral-500 hover:text-indigo-500 transition-colors"
+                    title={language === "de" ? "Diesen DJ drannehmen" : "Make this DJ current"}
+                  >
+                    <ArrowRight size={14} />
+                  </button>
+                )}
+                <button
+                  onClick={() => kickPlayer(p.id, p.nickname)}
+                  className="p-1.5 text-neutral-500 hover:text-red-500 transition-colors"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             </div>
           ))}
         </div>
