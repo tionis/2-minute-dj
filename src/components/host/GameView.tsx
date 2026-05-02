@@ -91,7 +91,7 @@ export default function GameView({ roomId }: { roomId: string }) {
     ) {
       doAdvance();
     }
-  }, [room?.status, room?.currentVideoId]);
+  }, [room?.status, room?.currentVideoId, queueItems]);
 
   const doAdvance = () => {
     const current = stateRef.current;
