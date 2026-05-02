@@ -1,25 +1,24 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
+import { id } from "@instantdb/react";
 import { useGameStore } from "@/lib/game-context";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Loader2, Music2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import db from "@/lib/db";
 
 function JoinContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { state, updateState, setRoomId, peerId, isConnected, peers } = useGameStore();
+  const { user, isLoadingAuth, peerId } = useGameStore();
 
   const [code, setCode] = useState("");
   const [nickname, setNickname] = useState("");
   const [isJoining, setIsJoining] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  const [hasTriedJoin, setHasTriedJoin] = useState(false);
-  const [connectionTimedOut, setConnectionTimedOut] = useState(false);
-  const [waitingForHost, setWaitingForHost] = useState(false);
+  const [foundRoom, setFoundRoom] = useState<any>(null);
 
-  // Auto-fill code from URL if present
   useEffect(() => {
     const urlCode = searchParams.get("code");
     if (urlCode) {
@@ -27,97 +26,55 @@ function JoinContent() {
     }
   }, [searchParams]);
 
-  // Try to connect when code is 4 chars
+  const { data, isLoading, error } = db.useQuery((
+    code.length === 4
+      ? { rooms: { $: { where: { code } } } }
+      : null
+  ) as any) as any;
+
+  const roomFromQuery = data?.rooms?.[0] ?? null;
+
   useEffect(() => {
-      if (code.length === 4) {
-          setRoomId(code);
-          setHasTriedJoin(true);
-          setConnectionTimedOut(false);
-          setWaitingForHost(false);
-      } else {
-          setRoomId(""); // Disconnect if invalid code
-          setHasTriedJoin(false);
-          setConnectionTimedOut(false);
-          setWaitingForHost(false);
-      }
-  }, [code, setRoomId]);
-
-  // Track when we're connected but no peers (waiting for host)
-  useEffect(() => {
-    if (hasTriedJoin && isConnected && peers.length === 0 && state.room.code !== code) {
-      setWaitingForHost(true);
-    } else {
-      setWaitingForHost(false);
+    if (code.length === 4 && !isLoading && roomFromQuery) {
+      setFoundRoom(roomFromQuery);
+    } else if (code.length !== 4) {
+      setFoundRoom(null);
     }
-  }, [hasTriedJoin, isConnected, peers.length, state.room.code, code]);
-
-  // Timeout mechanism: if room not found after 15 seconds, show error
-  useEffect(() => {
-    if (!hasTriedJoin || !isConnected) {
-      return; // No timeout needed
-    }
-    
-    // If we already found the room, no timeout needed
-    if (state.room.code === code) {
-      return;
-    }
-
-    const timeoutId = setTimeout(() => {
-      // If we're still connected but haven't received room data matching our code,
-      // the room likely doesn't exist (no host peer in that room)
-      if (state.room.code !== code) {
-        setConnectionTimedOut(true);
-      }
-    }, 15000); // 15 second timeout
-
-    return () => clearTimeout(timeoutId);
-  }, [hasTriedJoin, isConnected, state.room.code, code]);
-
-  // Room is only valid if we have peers AND state shows matching room code
-  // This ensures we actually connected to a host, not just an empty room
-  const hasHost = peers.length > 0;
-  const roomStateMatches = state.room.code === code;
-  const isValidRoom = code.length === 4 && roomStateMatches && hasHost;
+  }, [code, isLoading, roomFromQuery]);
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isValidRoom) {
-      if (waitingForHost || (isConnected && !hasHost)) {
-        setErrorMsg("No host found. Make sure the TV is showing this room code.");
-      } else {
-        setErrorMsg("Room not found. Check the code on the TV.");
-      }
+    if (!foundRoom) {
+      setErrorMsg("Room not found. Check the code on the TV.");
       return;
     }
     if (!nickname.trim()) {
       setErrorMsg("Please enter a cool nickname.");
       return;
     }
+    if (!user) {
+      setErrorMsg("Still authenticating, please wait...");
+      return;
+    }
 
     setIsJoining(true);
-    
-    // Create player profile
-    // We use the persistent peerId for identification
-    const playerId = peerId;
 
     try {
-      updateState(doc => {
-          doc.players[playerId] = {
-              id: playerId,
-              nickname: nickname,
-              avatar_seed: nickname,
-              joined_at: Date.now(),
-              is_online: true,
-          };
-      });
+      const playerId = id();
+      await db.transact([
+        db.tx.players[playerId]
+          .update({
+            userId: user.id,
+            nickname,
+            avatarSeed: nickname,
+            joinedAt: Date.now(),
+          })
+          .link({ room: foundRoom.id }),
+      ]);
 
-      // Navigate to play area
-      // We don't need params in URL necessarily if we use context, 
-      // but keeping them for consistency with original design or deep linking (though P2P deep link is harder)
-      // Actually, passing them helps PlayPage know "who am I" if we didn't have global store,
-      // but with global store we have `peerId`.
-      // We will keep params for now to match PlayPage expectation (which we will refactor next).
-      router.push(`/play?roomId=${state.room.id}&playerId=${playerId}`);
+      localStorage.setItem("2mdj_current_player_id", playerId);
+      localStorage.setItem("2mdj_current_room_id", foundRoom.id);
+      router.push(`/play?roomId=${foundRoom.id}&playerId=${playerId}`);
     } catch (err) {
       console.error(err);
       setErrorMsg("Failed to join. Try again.");
@@ -128,7 +85,6 @@ function JoinContent() {
   return (
     <div className="min-h-screen bg-neutral-950 text-white flex flex-col items-center justify-center p-6">
       <div className="max-w-md w-full space-y-8">
-        
         <div className="text-center space-y-2">
           <div className="inline-block p-4 rounded-full bg-purple-500/10 mb-2">
             <Music2 size={32} className="text-purple-500" />
@@ -138,7 +94,6 @@ function JoinContent() {
         </div>
 
         <form onSubmit={handleJoin} className="space-y-6 bg-neutral-900 p-8 rounded-3xl border border-neutral-800">
-          
           <div className="space-y-2">
             <label className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Room Code</label>
             <input
@@ -152,37 +107,27 @@ function JoinContent() {
               placeholder="ABCD"
               className={cn(
                 "w-full bg-neutral-800 border-2 border-transparent focus:border-indigo-500 rounded-xl p-4 text-center text-3xl font-mono tracking-[0.5em] uppercase outline-none transition-all placeholder:tracking-normal placeholder:font-sans placeholder:text-neutral-600",
-                code.length === 4 && !isValidRoom && hasTriedJoin && isConnected && !connectionTimedOut && !waitingForHost && "border-yellow-500/50",
-                code.length === 4 && waitingForHost && !connectionTimedOut && "border-orange-500/50",
-                code.length === 4 && connectionTimedOut && "border-red-500/50",
-                isValidRoom && "border-green-500/50"
+                code.length === 4 && !foundRoom && !isLoading && "border-yellow-500/50",
+                code.length === 4 && isLoading && "border-orange-500/50",
+                code.length === 4 && foundRoom && "border-green-500/50"
               )}
             />
-            {/* Searching state - just connected, looking for peers */}
-            {code.length === 4 && !isValidRoom && isConnected && !connectionTimedOut && !waitingForHost && !roomStateMatches && (
+            {code.length === 4 && !foundRoom && !isLoading && (
               <p className="text-yellow-400 text-xs text-center animate-in fade-in flex items-center justify-center gap-2">
                 <Loader2 className="animate-spin" size={12} />
-                Connecting to room...
+                Searching for room...
               </p>
             )}
-            {/* Waiting for host - connected to room but no peers yet */}
-            {code.length === 4 && waitingForHost && !connectionTimedOut && (
+            {code.length === 4 && isLoading && (
               <p className="text-orange-400 text-xs text-center animate-in fade-in flex items-center justify-center gap-2">
                 <Loader2 className="animate-spin" size={12} />
-                Waiting for host... Make sure the TV is showing this code.
+                Checking room...
               </p>
             )}
-            {/* Timeout - no host found after waiting */}
-            {connectionTimedOut && (
-              <p className="text-red-400 text-xs text-center animate-in fade-in">
-                No host found. Make sure the TV is showing this room code.
-              </p>
-            )}
-            {/* Success - found room and host */}
-            {isValidRoom && (
+            {code.length === 4 && foundRoom && (
               <p className="text-green-400 text-xs text-center animate-in fade-in flex items-center justify-center gap-2">
                 <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                Connected to host!
+                Room found! Enter your nickname to join.
               </p>
             )}
           </div>
@@ -207,7 +152,7 @@ function JoinContent() {
 
           <button
             type="submit"
-            disabled={!isValidRoom || !nickname || isJoining}
+            disabled={!foundRoom || !nickname || isJoining || isLoadingAuth}
             className="w-full bg-white text-black font-bold text-lg p-4 rounded-xl hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center space-x-2"
           >
             {isJoining ? (
@@ -220,7 +165,6 @@ function JoinContent() {
             )}
           </button>
         </form>
-
       </div>
     </div>
   );
@@ -228,11 +172,13 @@ function JoinContent() {
 
 export default function JoinPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
-        <Loader2 className="animate-spin" size={32} />
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
+          <Loader2 className="animate-spin" size={32} />
+        </div>
+      }
+    >
       <JoinContent />
     </Suspense>
   );
