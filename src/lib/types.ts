@@ -16,6 +16,7 @@ export interface Room {
   allowSelfVoting?: boolean;
   playerOrder?: string[];
   currentTurnIndex?: number;
+  preEndState?: Record<string, unknown>;
   createdAt: number;
 }
 

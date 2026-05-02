@@ -50,6 +50,7 @@ const _schema = i.schema({
       pausedAt: i.number().optional(),
       playbackStartedAt: i.number().optional(),
       playerOrder: i.any().optional(),
+      preEndState: i.any().optional(),
       previousQueueItemId: i.string().optional(),
       status: i.string(),
       timerDuration: i.number().optional(),

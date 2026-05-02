@@ -7,7 +7,7 @@ import { Suspense, useState, useEffect, useRef } from "react";
 import SearchStep from "@/components/player/SearchStep";
 import ClipperStep from "@/components/player/ClipperStep";
 import SuccessStep from "@/components/player/SuccessStep";
-import { Trash2, Home, ThumbsUp, ThumbsDown, Edit2, Pause } from "lucide-react";
+import { Trash2, Home, ThumbsUp, ThumbsDown, Edit2, Pause, RotateCcw } from "lucide-react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import InputModal from "@/components/ui/InputModal";
 import VIPControls from "@/components/player/VIPControls";
@@ -483,6 +483,31 @@ function PlayContent() {
   }
 
   if (room.status === "FINISHED") {
+    const resumeSession = () => {
+      if (!room) return;
+      const pre = room.preEndState;
+      if (pre) {
+        db.transact(db.tx.rooms[roomId].update({
+          status: "PAUSED",
+          currentVideoId: pre.currentVideoId ?? null,
+          currentStartTime: pre.currentStartTime ?? null,
+          currentVideoOffset: pre.currentVideoOffset ?? null,
+          activePlayerId: pre.activePlayerId ?? null,
+          activeQueueItemId: pre.activeQueueItemId ?? null,
+          currentTurnIndex: pre.currentTurnIndex ?? null,
+          playerOrder: pre.playerOrder ?? null,
+          playbackStartedAt: pre.playbackStartedAt ?? null,
+          pausedAt: Date.now(),
+          preEndState: null,
+        }));
+      } else {
+        db.transact(db.tx.rooms[roomId].update({
+          status: "LOBBY",
+          preEndState: null,
+        }));
+      }
+    };
+
     return (
       <div className="min-h-screen bg-neutral-950 text-white p-6 overflow-y-auto">
         <header className="flex justify-between items-center mb-8 opacity-50">
@@ -502,6 +527,17 @@ function PlayContent() {
           </div>
         </header>
         <SummaryView roomId={roomId} />
+        {isVip && (
+          <div className="flex justify-center mt-8">
+            <button
+              onClick={resumeSession}
+              className="px-8 py-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 font-bold text-sm flex items-center space-x-2 hover:bg-indigo-500/20 transition-all"
+            >
+              <RotateCcw size={18} />
+              <span>{language === "de" ? "Sitzung fortsetzen" : "Resume Session"}</span>
+            </button>
+          </div>
+        )}
         <ConfirmationModal
           isOpen={showQuitModal}
           onCancel={() => setShowQuitModal(false)}

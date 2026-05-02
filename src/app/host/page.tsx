@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { id } from "@instantdb/react";
 import { useGameStore } from "@/lib/game-context";
 import { generateRoomCode, computeAdvanceToNextSong } from "@/lib/utils";
-import { Copy, Users, Play, Loader2, X, Crown, LogOut, Languages, Clock, SkipForward } from "lucide-react";
+import { Copy, Users, Play, Loader2, X, Crown, LogOut, Languages, Clock, SkipForward, RotateCcw } from "lucide-react";
 import GameView from "@/components/host/GameView";
 import SummaryView from "@/components/host/SummaryView";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
@@ -148,6 +148,31 @@ export default function HostPage() {
   }
 
   if (room && (room as any).status === "FINISHED") {
+    const resumeSession = () => {
+      if (!room) return;
+      const pre = (room as any).preEndState;
+      if (pre) {
+        db.transact(db.tx.rooms[roomId].update({
+          status: "PAUSED",
+          currentVideoId: pre.currentVideoId ?? null,
+          currentStartTime: pre.currentStartTime ?? null,
+          currentVideoOffset: pre.currentVideoOffset ?? null,
+          activePlayerId: pre.activePlayerId ?? null,
+          activeQueueItemId: pre.activeQueueItemId ?? null,
+          currentTurnIndex: pre.currentTurnIndex ?? null,
+          playerOrder: pre.playerOrder ?? null,
+          playbackStartedAt: pre.playbackStartedAt ?? null,
+          pausedAt: Date.now(),
+          preEndState: null,
+        }));
+      } else {
+        db.transact(db.tx.rooms[roomId].update({
+          status: "LOBBY",
+          preEndState: null,
+        }));
+      }
+    };
+
     return (
       <div className="min-h-screen bg-neutral-950 text-white p-12 overflow-y-auto relative">
         <div className="absolute top-6 left-6 z-50 flex items-center space-x-4">
@@ -162,6 +187,15 @@ export default function HostPage() {
           {renderLangSwitcher()}
         </div>
         <SummaryView roomId={roomId} />
+        <div className="flex justify-center mt-8">
+          <button
+            onClick={resumeSession}
+            className="px-8 py-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 font-bold text-sm flex items-center space-x-2 hover:bg-indigo-500/20 transition-all"
+          >
+            <RotateCcw size={18} />
+            <span>{language === "de" ? "Sitzung fortsetzen" : "Resume Session"}</span>
+          </button>
+        </div>
         <ConfirmationModal
           isOpen={showQuitModal}
           onCancel={() => setShowQuitModal(false)}

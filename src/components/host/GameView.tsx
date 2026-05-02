@@ -228,6 +228,16 @@ export default function GameView({ roomId }: { roomId: string }) {
       (q: any) => q.id === room.activeQueueItemId
     );
 
+    const preEndState: Record<string, unknown> = {};
+    if (room.currentVideoId != null) preEndState.currentVideoId = room.currentVideoId;
+    if (room.currentStartTime != null) preEndState.currentStartTime = room.currentStartTime;
+    if (room.currentVideoOffset != null) preEndState.currentVideoOffset = room.currentVideoOffset;
+    if (room.playbackStartedAt != null) preEndState.playbackStartedAt = room.playbackStartedAt;
+    if (room.activePlayerId != null) preEndState.activePlayerId = room.activePlayerId;
+    if (room.activeQueueItemId != null) preEndState.activeQueueItemId = room.activeQueueItemId;
+    if (room.currentTurnIndex != null) preEndState.currentTurnIndex = room.currentTurnIndex;
+    if (room.playerOrder) preEndState.playerOrder = room.playerOrder;
+
     const txns: any[] = [
       db.tx.rooms[roomId].update({
         status: "FINISHED",
@@ -235,6 +245,7 @@ export default function GameView({ roomId }: { roomId: string }) {
         activePlayerId: null,
         playbackStartedAt: null,
         pausedAt: null,
+        preEndState,
       }),
     ];
 

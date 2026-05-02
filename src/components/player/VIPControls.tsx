@@ -1,6 +1,6 @@
 "use client";
 
-import { SkipForward, Pause, Play, Users, Clock, Trash2, Crown, Plus, ArrowRight } from "lucide-react";
+import { SkipForward, Pause, Play, Users, Clock, Trash2, Crown, Plus, ArrowRight, AlertTriangle } from "lucide-react";
 import { useState } from "react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useI18n } from "@/components/LanguageProvider";
@@ -18,6 +18,7 @@ export default function VIPControls({ room, players, queueItems, roomId }: VIPCo
   const { t, language } = useI18n();
   const [kickPlayerId, setKickPlayerId] = useState<string | null>(null);
   const [kickPlayerName, setKickPlayerName] = useState("");
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
 
   const handleSkip = () => {
     if (!room) return;
@@ -143,6 +144,44 @@ export default function VIPControls({ room, players, queueItems, roomId }: VIPCo
     }
 
     db.transact(txns);
+  };
+
+  const endSession = () => {
+    if (!room) return;
+
+    const currentActiveItem = queueItems.find(
+      (q: any) => q.id === room.activeQueueItemId
+    );
+
+    const preEndState: Record<string, unknown> = {};
+    if (room.currentVideoId != null) preEndState.currentVideoId = room.currentVideoId;
+    if (room.currentStartTime != null) preEndState.currentStartTime = room.currentStartTime;
+    if (room.currentVideoOffset != null) preEndState.currentVideoOffset = room.currentVideoOffset;
+    if (room.playbackStartedAt != null) preEndState.playbackStartedAt = room.playbackStartedAt;
+    if (room.activePlayerId != null) preEndState.activePlayerId = room.activePlayerId;
+    if (room.activeQueueItemId != null) preEndState.activeQueueItemId = room.activeQueueItemId;
+    if (room.currentTurnIndex != null) preEndState.currentTurnIndex = room.currentTurnIndex;
+    if (room.playerOrder) preEndState.playerOrder = room.playerOrder;
+
+    const txns: any[] = [
+      db.tx.rooms[roomId].update({
+        status: "FINISHED",
+        currentVideoId: null,
+        activePlayerId: null,
+        playbackStartedAt: null,
+        pausedAt: null,
+        preEndState,
+      }),
+    ];
+
+    if (currentActiveItem) {
+      txns.push(
+        db.tx.queueItems[currentActiveItem.id].update({ status: "PLAYED" })
+      );
+    }
+
+    db.transact(txns);
+    setShowEndConfirm(false);
   };
 
   return (
@@ -279,6 +318,14 @@ export default function VIPControls({ room, players, queueItems, roomId }: VIPCo
         </div>
       </div>
 
+      <button
+        onClick={() => setShowEndConfirm(true)}
+        className="w-full py-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 font-bold text-xs flex items-center justify-center space-x-2 hover:bg-red-500/20 transition-all"
+      >
+        <AlertTriangle size={14} />
+        <span>{language === "de" ? "Sitzung beenden" : "End Session"}</span>
+      </button>
+
       <ConfirmationModal
         isOpen={!!kickPlayerId}
         onCancel={() => setKickPlayerId(null)}
@@ -290,6 +337,20 @@ export default function VIPControls({ room, players, queueItems, roomId }: VIPCo
             : "Are you sure you want to kick this player?"
         }
         confirmText={t("kick")}
+        cancelText={t("cancel")}
+      />
+
+      <ConfirmationModal
+        isOpen={showEndConfirm}
+        onCancel={() => setShowEndConfirm(false)}
+        onConfirm={endSession}
+        title={language === "de" ? "Sitzung beenden?" : "End Session?"}
+        description={
+          language === "de"
+            ? "Bist du sicher, dass du die Party beenden willst? Du kannst sie später fortsetzen."
+            : "Are you sure you want to end the party? You can resume it later."
+        }
+        confirmText={language === "de" ? "Beenden" : "End"}
         cancelText={t("cancel")}
       />
     </div>
