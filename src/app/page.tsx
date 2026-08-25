@@ -93,8 +93,7 @@ export default function Home() {
       </div>
       
       <div className="absolute bottom-8 text-neutral-600 text-sm">
-        {t("poweredBy")}
-        <a href="https://instantdb.com/" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-400 transition-colors">InstantDB</a>
+        Self-hosted realtime party infrastructure
       </div>
     </div>
   );

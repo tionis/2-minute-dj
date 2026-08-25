@@ -1,23 +1,21 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { id } from "@instantdb/react";
 import { useGameStore } from "@/lib/game-context";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Loader2, Music2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import db from "@/lib/db";
+import { createId } from "@/lib/utils";
 
 function JoinContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, isLoadingAuth, peerId } = useGameStore();
+  const { isLoadingAuth, connectPlayer } = useGameStore();
 
   const [code, setCode] = useState("");
   const [nickname, setNickname] = useState("");
   const [isJoining, setIsJoining] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  const [foundRoom, setFoundRoom] = useState<any>(null);
 
   useEffect(() => {
     const urlCode = searchParams.get("code");
@@ -26,58 +24,29 @@ function JoinContent() {
     }
   }, [searchParams]);
 
-  const { data, isLoading, error } = db.useQuery((
-    code.length === 4
-      ? { rooms: { $: { where: { code } } } }
-      : null
-  ) as any) as any;
-
-  const roomFromQuery = data?.rooms?.[0] ?? null;
-
-  useEffect(() => {
-    if (code.length === 4 && !isLoading && roomFromQuery) {
-      setFoundRoom(roomFromQuery);
-    } else if (code.length !== 4) {
-      setFoundRoom(null);
-    }
-  }, [code, isLoading, roomFromQuery]);
-
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!foundRoom) {
-      setErrorMsg("Room not found. Check the code on the TV.");
-      return;
-    }
+    if (code.length !== 4) return;
     if (!nickname.trim()) {
       setErrorMsg("Please enter a cool nickname.");
       return;
     }
-    if (!user) {
-      setErrorMsg("Still authenticating, please wait...");
-      return;
-    }
-
     setIsJoining(true);
 
     try {
-      const playerId = id();
-      await db.transact([
-        db.tx.players[playerId]
-          .update({
-            userId: user.id,
-            nickname,
-            avatarSeed: nickname,
-            joinedAt: Date.now(),
-          })
-          .link({ room: foundRoom.id }),
-      ]);
+      const playerId = createId();
+      const playerToken = crypto.randomUUID();
+      const state = await connectPlayer(code, playerId, playerToken, nickname.trim());
 
       localStorage.setItem("2mdj_current_player_id", playerId);
-      localStorage.setItem("2mdj_current_room_id", foundRoom.id);
-      router.push(`/play?roomId=${foundRoom.id}&playerId=${playerId}`);
+      localStorage.setItem("2mdj_current_player_token", playerToken);
+      localStorage.setItem("2mdj_current_player_name", nickname.trim());
+      localStorage.setItem("2mdj_current_room_id", state.room.id);
+      localStorage.setItem("2mdj_current_room_code", code);
+      router.push(`/play?roomId=${state.room.id}&playerId=${playerId}`);
     } catch (err) {
       console.error(err);
-      setErrorMsg("Failed to join. Try again.");
+      setErrorMsg(err instanceof Error ? err.message : "Failed to join. Try again.");
       setIsJoining(false);
     }
   };
@@ -107,27 +76,13 @@ function JoinContent() {
               placeholder="ABCD"
               className={cn(
                 "w-full bg-neutral-800 border-2 border-transparent focus:border-indigo-500 rounded-xl p-4 text-center text-3xl font-mono tracking-[0.5em] uppercase outline-none transition-all placeholder:tracking-normal placeholder:font-sans placeholder:text-neutral-600",
-                code.length === 4 && !foundRoom && !isLoading && "border-yellow-500/50",
-                code.length === 4 && isLoading && "border-orange-500/50",
-                code.length === 4 && foundRoom && "border-green-500/50"
+                code.length === 4 && "border-green-500/50"
               )}
             />
-            {code.length === 4 && !foundRoom && !isLoading && (
-              <p className="text-yellow-400 text-xs text-center animate-in fade-in flex items-center justify-center gap-2">
-                <Loader2 className="animate-spin" size={12} />
-                Searching for room...
-              </p>
-            )}
-            {code.length === 4 && isLoading && (
-              <p className="text-orange-400 text-xs text-center animate-in fade-in flex items-center justify-center gap-2">
-                <Loader2 className="animate-spin" size={12} />
-                Checking room...
-              </p>
-            )}
-            {code.length === 4 && foundRoom && (
+            {code.length === 4 && (
               <p className="text-green-400 text-xs text-center animate-in fade-in flex items-center justify-center gap-2">
                 <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                Room found! Enter your nickname to join.
+                Ready to connect securely to the room.
               </p>
             )}
           </div>
@@ -152,7 +107,7 @@ function JoinContent() {
 
           <button
             type="submit"
-            disabled={!foundRoom || !nickname || isJoining || isLoadingAuth}
+            disabled={code.length !== 4 || !nickname.trim() || isJoining || isLoadingAuth}
             className="w-full bg-white text-black font-bold text-lg p-4 rounded-xl hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center space-x-2"
           >
             {isJoining ? (

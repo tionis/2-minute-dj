@@ -4,17 +4,14 @@ import { SkipForward, Pause, Play, Users, Clock, Trash2, Crown, Plus, ArrowRight
 import { useState } from "react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useI18n } from "@/components/LanguageProvider";
-import { computeAdvanceToNextSong, getPlayerOrder } from "@/lib/utils";
 import db from "@/lib/db";
 
 interface VIPControlsProps {
   room: any;
   players: any[];
-  queueItems: any[];
-  roomId: string;
 }
 
-export default function VIPControls({ room, players, queueItems, roomId }: VIPControlsProps) {
+export default function VIPControls({ room, players }: VIPControlsProps) {
   const { t, language } = useI18n();
   const [kickPlayerId, setKickPlayerId] = useState<string | null>(null);
   const [kickPlayerName, setKickPlayerName] = useState("");
@@ -22,18 +19,7 @@ export default function VIPControls({ room, players, queueItems, roomId }: VIPCo
 
   const handleSkip = () => {
     if (!room) return;
-
-    const result = computeAdvanceToNextSong(room, players, queueItems, true);
-
-    const txns: any[] = [];
-    if (result.queueItemUpdates) {
-      for (const [itemId, updates] of Object.entries(result.queueItemUpdates)) {
-        txns.push(db.tx.queueItems[itemId].update(updates as any));
-      }
-    }
-    txns.push(db.tx.rooms[roomId].update(result.roomUpdates));
-
-    db.transact(txns);
+    void db.advance(room.activeQueueItemId, "SKIPPED");
   };
 
   const togglePause = () => {
@@ -43,31 +29,14 @@ export default function VIPControls({ room, players, queueItems, roomId }: VIPCo
         : 0;
       const videoOffset = (room.currentStartTime || 0) + elapsedSeconds;
 
-      db.transact(
-        db.tx.rooms[roomId].update({
-          status: "PAUSED",
-          pausedAt: Date.now(),
-          currentVideoOffset: videoOffset,
-        })
-      );
+      void db.pause(videoOffset);
     } else {
-      const pauseDuration = room.pausedAt
-        ? Date.now() - room.pausedAt
-        : 0;
-      const newStart = (room.playbackStartedAt || Date.now()) + pauseDuration;
-
-      db.transact(
-        db.tx.rooms[roomId].update({
-          status: "PLAYING",
-          playbackStartedAt: newStart,
-          pausedAt: null,
-        })
-      );
+      void db.resume();
     }
   };
 
   const updateTimer = (sec: number) => {
-    db.transact(db.tx.rooms[roomId].update({ timerDuration: sec }));
+    void db.setTimer(sec);
   };
 
   const kickPlayer = (pId: string, name: string) => {
@@ -77,110 +46,24 @@ export default function VIPControls({ room, players, queueItems, roomId }: VIPCo
 
   const confirmKick = () => {
     if (kickPlayerId) {
-      db.transact(db.tx.players[kickPlayerId].delete());
+      void db.kickPlayer(kickPlayerId);
       setKickPlayerId(null);
     }
   };
 
   const addTime = (seconds: number) => {
     if (!room.playbackStartedAt) return;
-    db.transact(
-      db.tx.rooms[roomId].update({
-        playbackStartedAt: room.playbackStartedAt + seconds * 1000,
-      })
-    );
+    void db.addTime(seconds);
   };
 
   const forcePlayerTurn = (playerId: string) => {
     if (!room) return;
-    const playerOrder = getPlayerOrder(players, room.playerOrder);
-    const idx = playerOrder.indexOf(playerId);
-    if (idx === -1) return;
-
-    const pendingForPlayer = queueItems.filter(
-      (q: any) => q.status === "PENDING" && q.playerId === playerId
-    );
-
-    const txns: any[] = [];
-
-    if (room.activeQueueItemId) {
-      const currentItem = queueItems.find(
-        (q: any) => q.id === room.activeQueueItemId
-      );
-      if (currentItem) {
-        txns.push(db.tx.queueItems[currentItem.id].update({ status: "PLAYED" }));
-      }
-    }
-
-    if (pendingForPlayer.length > 0) {
-      const nextItem = pendingForPlayer.sort(
-        (a: any, b: any) => a.createdAt - b.createdAt
-      )[0];
-      txns.push(
-        db.tx.rooms[roomId].update({
-          currentTurnIndex: idx,
-          activePlayerId: playerId,
-          activeQueueItemId: nextItem.id,
-          currentVideoId: nextItem.videoId,
-          currentStartTime: nextItem.highlightStart,
-          currentVideoOffset: nextItem.highlightStart,
-          playbackStartedAt: Date.now(),
-          previousQueueItemId: room.activeQueueItemId ?? null,
-        })
-      );
-    } else {
-      txns.push(
-        db.tx.rooms[roomId].update({
-          currentTurnIndex: idx,
-          activePlayerId: playerId,
-          activeQueueItemId: null,
-          currentVideoId: null,
-          currentStartTime: null,
-          currentVideoOffset: null,
-          playbackStartedAt: null,
-          previousQueueItemId: room.activeQueueItemId ?? null,
-        })
-      );
-    }
-
-    db.transact(txns);
+    void db.forceTurn(playerId);
   };
 
   const endSession = () => {
     if (!room) return;
-
-    const currentActiveItem = queueItems.find(
-      (q: any) => q.id === room.activeQueueItemId
-    );
-
-    const preEndState: Record<string, unknown> = {};
-    if (room.currentVideoId != null) preEndState.currentVideoId = room.currentVideoId;
-    if (room.currentStartTime != null) preEndState.currentStartTime = room.currentStartTime;
-    if (room.currentVideoOffset != null) preEndState.currentVideoOffset = room.currentVideoOffset;
-    if (room.playbackStartedAt != null) preEndState.playbackStartedAt = room.playbackStartedAt;
-    if (room.activePlayerId != null) preEndState.activePlayerId = room.activePlayerId;
-    if (room.activeQueueItemId != null) preEndState.activeQueueItemId = room.activeQueueItemId;
-    if (room.currentTurnIndex != null) preEndState.currentTurnIndex = room.currentTurnIndex;
-    if (room.playerOrder) preEndState.playerOrder = room.playerOrder;
-
-    const txns: any[] = [
-      db.tx.rooms[roomId].update({
-        status: "FINISHED",
-        currentVideoId: null,
-        activePlayerId: null,
-        playbackStartedAt: null,
-        pausedAt: null,
-        preEndState,
-      }),
-    ];
-
-    if (currentActiveItem) {
-      txns.push(
-        db.tx.queueItems[currentActiveItem.id].update({ status: "PLAYED" })
-      );
-    }
-
-    db.transact(txns);
+    void db.endSession();
     setShowEndConfirm(false);
   };
 
@@ -264,13 +147,7 @@ export default function VIPControls({ room, players, queueItems, roomId }: VIPCo
             </span>
           </div>
           <button
-            onClick={() =>
-              db.transact(
-                db.tx.rooms[roomId].update({
-                  autoSkip: room.autoSkip === false ? null : false,
-                })
-              )
-            }
+            onClick={() => void db.setAutoSkip(room.autoSkip === false)}
             className={`relative w-12 h-6 rounded-full transition-colors ${
               room.autoSkip !== false ? "bg-indigo-500" : "bg-neutral-700"
             }`}

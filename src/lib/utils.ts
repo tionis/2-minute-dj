@@ -1,8 +1,6 @@
-"use client";
-
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
-import type { Room, Player, QueueItem } from "./types";
+import type { Room, Player, QueueItem } from "./types.js";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -15,6 +13,10 @@ export function generateRoomCode(): string {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return result;
+}
+
+export function createId(): string {
+  return crypto.randomUUID();
 }
 
 export function getPlayerOrder(
@@ -49,10 +51,12 @@ export function computeAdvanceToNextSong(
 ): AdvanceResult {
   const queueItemUpdates: Record<string, unknown> = {};
   const roomUpdates: Record<string, unknown> = {};
-  const pendingQueue = queueItems.filter((q) => q.status === "PENDING");
-
   const currentActiveItem = queueItems.find(
     (q) => q.id === room.activeQueueItemId
+  );
+
+  const pendingQueue = queueItems.filter(
+    (q) => q.status === "PENDING" && (!markCurrentAsPlayed || q.id !== currentActiveItem?.id)
   );
 
   if (currentActiveItem && markCurrentAsPlayed) {

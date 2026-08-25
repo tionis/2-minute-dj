@@ -58,7 +58,11 @@ export default function SearchStep({ onNext }: SearchStepProps) {
     if (videoId) {
       setLoading(true);
       try {
-        const response = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${videoId}`);
+        const apiOrigin = window.location.port === "3000"
+          ? `${window.location.protocol}//${window.location.hostname}:2567`
+          : "";
+        const response = await fetch(`${apiOrigin}/api/youtube-metadata?videoId=${encodeURIComponent(videoId)}`);
+        if (!response.ok) throw new Error(`YouTube metadata request failed (${response.status})`);
         const data = await response.json();
         const title = data.title || (language === "de" ? "Unbekannter Titel" : "Unknown Title");
         onNext(videoId, startTime, title);

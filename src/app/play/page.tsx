@@ -15,15 +15,14 @@ import { Slider } from "@/components/ui/slider";
 import SummaryView from "@/components/host/SummaryView";
 import { useI18n } from "@/components/LanguageProvider";
 import db from "@/lib/db";
-import { id } from "@instantdb/react";
-import { computeAdvanceToNextSong } from "@/lib/utils";
+import { createId } from "@/lib/utils";
 
 function PlayContent() {
   const { t, language, setLanguage } = useI18n();
   const searchParams = useSearchParams();
   const urlRoomId = searchParams.get("roomId");
   const urlPlayerId = searchParams.get("playerId");
-  const { user, isLoadingAuth, peerId } = useGameStore();
+  const { isLoadingAuth, connectPlayer, disconnect, snapshot, connectionError } = useGameStore();
 
   const [roomId] = useState<string | null>(
     urlRoomId ||
@@ -49,6 +48,19 @@ function PlayContent() {
   const [deleteItemId, setDeleteItem] = useState<string | null>(null);
   const [localVote, setLocalVote] = useState(50);
   const [localPrevVote, setLocalPrevVote] = useState(50);
+  const [missingCredentials, setMissingCredentials] = useState(false);
+
+  useEffect(() => {
+    if (!roomId || !playerId || snapshot?.room.id === roomId) return;
+    const code = localStorage.getItem("2mdj_current_room_code");
+    const token = localStorage.getItem("2mdj_current_player_token");
+    const name = localStorage.getItem("2mdj_current_player_name");
+    if (code && token && name) {
+      void connectPlayer(code, playerId, token, name).catch(() => undefined);
+    } else {
+      setMissingCredentials(true);
+    }
+  }, [connectPlayer, playerId, roomId, snapshot?.room.id]);
 
   const { data, isLoading } = db.useQuery((
     roomId
@@ -82,36 +94,7 @@ function PlayContent() {
 
   const handleSkip = () => {
     if (!roomId || !room) return;
-
-    const currentActiveItem = queueItems.find(
-      (q: any) => q.id === room.activeQueueItemId
-    );
-
-    const result = computeAdvanceToNextSong(
-      room,
-      players,
-      queueItems,
-      false
-    );
-
-    const txns: any[] = [];
-
-    if (currentActiveItem) {
-      txns.push(
-        db.tx.queueItems[currentActiveItem.id].update({
-          status: "SKIPPED",
-        })
-      );
-    }
-
-    txns.push(
-      db.tx.rooms[roomId].update({
-        ...result.roomUpdates,
-        previousQueueItemId: currentActiveItem?.id ?? null,
-      })
-    );
-
-    db.transact(txns);
+    void db.advance(room.activeQueueItemId, "SKIPPED");
   };
 
   useEffect(() => {
@@ -126,11 +109,30 @@ function PlayContent() {
     setLocalPrevVote(50);
   }, [previousQueueItem?.id]);
 
+  if (missingCredentials) {
+    return (
+      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-white p-6 gap-4 text-center">
+        <p className="text-neutral-300 font-bold">This device needs to join the room again.</p>
+        <a href="/join" className="px-5 py-3 rounded-xl bg-white text-black font-bold">Join a room</a>
+      </div>
+    );
+  }
+
   if (isLoadingAuth || isLoading) {
     return (
       <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-white space-y-4">
         <Loader2 className="animate-spin text-indigo-500" size={32} />
         <p className="text-neutral-500 text-sm">Loading party...</p>
+      </div>
+    );
+  }
+
+  if (connectionError && !room) {
+    return (
+      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-white p-6 gap-4 text-center">
+        <p className="text-red-400 font-bold">Connection failed</p>
+        <p className="text-neutral-500 text-sm max-w-sm">{connectionError}</p>
+        <a href="/join" className="px-5 py-3 rounded-xl bg-white text-black font-bold">Join again</a>
       </div>
     );
   }
@@ -219,40 +221,22 @@ function PlayContent() {
 
   const commitVote = () => {
     if (!activeQueueItem) return;
-    const votes = { ...(activeQueueItem.votes || {}), [playerId!]: localVote };
-    db.transact(
-      db.tx.queueItems[activeQueueItem.id].update({ votes })
-    );
+    void db.vote(activeQueueItem.id, localVote);
   };
 
   const commitPreviousVote = () => {
     if (!previousQueueItem) return;
-    const votes = {
-      ...(previousQueueItem.votes || {}),
-      [playerId!]: localPrevVote,
-    };
-    db.transact(
-      db.tx.queueItems[previousQueueItem.id].update({ votes })
-    );
+    void db.vote(previousQueueItem.id, localPrevVote);
   };
 
-  const handleQueue = (startTime: number) => {
+  const handleQueue = async (startTime: number) => {
     if (!videoData || !roomId || !playerId) return;
 
-    const queueId = id();
-    db.transact([
-      db.tx.queueItems[queueId]
-        .update({
-          playerId,
-          videoId: videoData.id,
-          videoTitle: videoData.title,
-          highlightStart: startTime,
-          status: "PENDING",
-          createdAt: Date.now(),
-        })
-        .link({ player: playerId, room: roomId }),
-    ]);
-    setStep("SUCCESS");
+    const queueId = createId();
+    try {
+      await db.queueSong(queueId, videoData.id, videoData.title, startTime);
+      setStep("SUCCESS");
+    } catch { /* global action banner explains the failure */ }
   };
 
   const handleDeleteClick = (itemId: string) => {
@@ -261,23 +245,29 @@ function PlayContent() {
 
   const handleDeleteConfirm = () => {
     if (deleteItemId) {
-      db.transact(db.tx.queueItems[deleteItemId].delete());
+      void db.removeQueueItem(deleteItemId);
       setDeleteItem(null);
     }
   };
 
   const handleChangeName = (newName: string) => {
     if (!playerId) return;
-    db.transact(db.tx.players[playerId].update({ nickname: newName }));
+    void db.renamePlayer(newName);
     setShowNameModal(false);
   };
 
-  const handleQuitConfirm = () => {
+  const handleQuitConfirm = async () => {
     if (playerId) {
-      db.transact(db.tx.players[playerId].delete());
+      try {
+        await db.leaveRoom();
+      } catch {}
     }
     localStorage.removeItem("2mdj_current_player_id");
     localStorage.removeItem("2mdj_current_room_id");
+    localStorage.removeItem("2mdj_current_room_code");
+    localStorage.removeItem("2mdj_current_player_token");
+    localStorage.removeItem("2mdj_current_player_name");
+    await disconnect();
     window.location.href = "/";
   };
 
@@ -300,16 +290,11 @@ function PlayContent() {
 
   if (room.status === "LOBBY") {
     const handleStartParty = () => {
-      db.transact(
-        db.tx.rooms[roomId].update({
-          status: "PLAYING",
-          playbackStartedAt: Date.now(),
-        })
-      );
+      void db.startGame();
     };
 
     const updateTimer = (sec: number) => {
-      db.transact(db.tx.rooms[roomId].update({ timerDuration: sec }));
+      void db.setTimer(sec);
     };
 
     return (
@@ -416,11 +401,7 @@ function PlayContent() {
                 </div>
                 <button
                   onClick={() =>
-                    db.transact(
-                      db.tx.rooms[roomId].update({
-                        autoSkip: room.autoSkip === false ? null : false,
-                      })
-                    )
+                    void db.setAutoSkip(room.autoSkip === false)
                   }
                   className={`relative w-12 h-6 rounded-full transition-colors ${
                     room.autoSkip !== false ? "bg-indigo-500" : "bg-neutral-700"
@@ -445,11 +426,7 @@ function PlayContent() {
                 </div>
                 <button
                   onClick={() =>
-                    db.transact(
-                      db.tx.rooms[roomId].update({
-                        allowSelfVoting: !room.allowSelfVoting,
-                      })
-                    )
+                    void db.setSelfVoting(!room.allowSelfVoting)
                   }
                   className={`relative w-12 h-6 rounded-full transition-colors ${
                     room.allowSelfVoting ? "bg-indigo-500" : "bg-neutral-700"
@@ -485,27 +462,7 @@ function PlayContent() {
   if (room.status === "FINISHED") {
     const resumeSession = () => {
       if (!room) return;
-      const pre = room.preEndState;
-      if (pre) {
-        db.transact(db.tx.rooms[roomId].update({
-          status: "PAUSED",
-          currentVideoId: pre.currentVideoId ?? null,
-          currentStartTime: pre.currentStartTime ?? null,
-          currentVideoOffset: pre.currentVideoOffset ?? null,
-          activePlayerId: pre.activePlayerId ?? null,
-          activeQueueItemId: pre.activeQueueItemId ?? null,
-          currentTurnIndex: pre.currentTurnIndex ?? null,
-          playerOrder: pre.playerOrder ?? null,
-          playbackStartedAt: pre.playbackStartedAt ?? null,
-          pausedAt: Date.now(),
-          preEndState: null,
-        }));
-      } else {
-        db.transact(db.tx.rooms[roomId].update({
-          status: "LOBBY",
-          preEndState: null,
-        }));
-      }
+      void db.resumeSession();
     };
 
     return (
@@ -526,7 +483,7 @@ function PlayContent() {
             <Edit2 size={12} className="opacity-50" />
           </div>
         </header>
-        <SummaryView roomId={roomId} />
+        <SummaryView roomId={roomId} role="player" />
         {isVip && (
           <div className="flex justify-center mt-8">
             <button
@@ -805,7 +762,7 @@ function PlayContent() {
       </div>
 
       {isVip && (
-        <VIPControls room={room} players={players} queueItems={queueItems} roomId={roomId} />
+        <VIPControls room={room} players={players} />
       )}
     </div>
   );

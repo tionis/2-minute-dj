@@ -1,11 +1,13 @@
 "use client";
 
 import { Trophy, ExternalLink, ThumbsUp, Share, Download, FileCode, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ShareLinkModal from "@/components/ui/ShareLinkModal";
 import { useI18n } from "@/components/LanguageProvider";
 import db from "@/lib/db";
 import LZString from "lz-string";
+import { escapeHtml, saveSession } from "@/lib/session-history";
+import { useGameStore } from "@/lib/game-context";
 
 interface SummarySong {
   id: string;
@@ -25,10 +27,23 @@ interface SummaryViewProps {
   data?: SummaryData;
   goHome?: boolean;
   roomId?: string;
+  role?: "host" | "player";
 }
 
-export default function SummaryView({ data, goHome, roomId }: SummaryViewProps) {
+function SessionHistoryRecorder({ roomCode, songs, playerCount, role, summaryId }: {
+  roomCode: string; songs: SummarySong[]; playerCount: number; role?: "host" | "player"; summaryId?: string;
+}) {
+  const endedAt = useRef(Date.now());
+  useEffect(() => {
+    if (!role || !roomCode) return;
+    saveSession({ roomCode, songs, playerCount, role, summaryId, endedAt: endedAt.current });
+  }, [playerCount, role, roomCode, songs, summaryId]);
+  return null;
+}
+
+export default function SummaryView({ data, goHome, roomId, role }: SummaryViewProps) {
   const { t, language } = useI18n();
+  const { disconnect } = useGameStore();
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [shareUrl, setShareUrl] = useState("");
 
@@ -104,12 +119,13 @@ export default function SummaryView({ data, goHome, roomId }: SummaryViewProps) 
   };
 
   const handleDownloadHTML = () => {
+    const safeRoomCode = escapeHtml(roomCode);
     const htmlContent = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>2-Minute DJ Session - ${roomCode}</title>
+  <title>2-Minute DJ Session - ${safeRoomCode}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #fff; padding: 40px 20px; line-height: 1.6; }
@@ -136,7 +152,7 @@ export default function SummaryView({ data, goHome, roomId }: SummaryViewProps) 
 <body>
   <div class="container">
     <h1>🎧 Session Summary</h1>
-    <p class="subtitle">${playedSongs.length} tracks shared • Room: ${roomCode}</p>
+    <p class="subtitle">${playedSongs.length} tracks shared • Room: ${safeRoomCode}</p>
 
     ${playedSongs
       .map((song, index) => {
@@ -152,13 +168,13 @@ export default function SummaryView({ data, goHome, roomId }: SummaryViewProps) 
         return `
     <div class="song">
       <div class="index">${index + 1}</div>
-      <img class="thumbnail" src="https://img.youtube.com/vi/${song.video_id}/mqdefault.jpg" alt="" onerror="this.style.display='none'">
+      <img class="thumbnail" src="https://img.youtube.com/vi/${escapeHtml(song.video_id)}/mqdefault.jpg" alt="" onerror="this.style.display='none'">
       <div class="info">
-        <div class="title">${song.video_title || `Unknown Track (${song.video_id})`}${song.status === "SKIPPED" ? '<span class="skipped">Skipped</span>' : ""}</div>
-        <div class="dj">DJ ${song.player_nickname}</div>
+        <div class="title">${escapeHtml(song.video_title || `Unknown Track (${song.video_id})`)}${song.status === "SKIPPED" ? '<span class="skipped">Skipped</span>' : ""}</div>
+        <div class="dj">DJ ${escapeHtml(song.player_nickname)}</div>
       </div>
       ${score !== null ? `<div class="score ${scoreClass}">${score}%</div>` : ""}
-      <a class="link" href="https://youtube.com/watch?v=${song.video_id}" target="_blank" rel="noopener">▶</a>
+      <a class="link" href="https://youtube.com/watch?v=${encodeURIComponent(song.video_id)}" target="_blank" rel="noopener">▶</a>
     </div>`;
       })
       .join("")}
@@ -182,6 +198,8 @@ export default function SummaryView({ data, goHome, roomId }: SummaryViewProps) 
 
     if (data) {
       url = typeof window !== "undefined" ? window.location.href : "";
+    } else if (room?.summaryId) {
+      url = `${typeof window !== "undefined" ? window.location.origin : ""}/summary?id=${encodeURIComponent(room.summaryId)}`;
     } else {
       const summaryData: SummaryData = {
         roomCode,
@@ -196,21 +214,34 @@ export default function SummaryView({ data, goHome, roomId }: SummaryViewProps) 
     setShowLinkModal(true);
   };
 
-  const handleNewSession = () => {
+  const handleNewSession = async () => {
+    if (role === "host") {
+      try { await db.closeRoom(); } catch { /* global action banner explains the failure */ }
+      await disconnect();
+    }
     localStorage.removeItem("2mdj_host_roomId");
     localStorage.removeItem("2mdj_host_roomCode");
+    localStorage.removeItem("2mdj_host_token");
     localStorage.removeItem("2mdj_doc_backup");
     window.location.href = "/host";
   };
 
-  const handleGoHome = () => {
+  const handleGoHome = async () => {
+    if (role === "player") {
+      try { await db.leaveRoom(); } catch { /* the room may already be gone */ }
+      await disconnect();
+    }
     localStorage.removeItem("2mdj_current_player_id");
     localStorage.removeItem("2mdj_current_room_id");
+    localStorage.removeItem("2mdj_current_room_code");
+    localStorage.removeItem("2mdj_current_player_token");
+    localStorage.removeItem("2mdj_current_player_name");
     window.location.href = "/";
   };
 
   return (
     <div className="max-w-4xl mx-auto w-full py-12 space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-1000">
+      <SessionHistoryRecorder roomCode={roomCode} songs={playedSongs} playerCount={roomPlayers.length} role={role} summaryId={room?.summaryId} />
       <div className="text-center space-y-4">
         <div className="inline-block p-4 rounded-full bg-yellow-500/10 text-yellow-500 mb-2">
           <Trophy size={48} />
@@ -302,11 +333,11 @@ export default function SummaryView({ data, goHome, roomId }: SummaryViewProps) 
       <div className="flex flex-col sm:flex-row justify-center items-center gap-4 flex-wrap">
         {!data && (
           <button
-            onClick={goHome ? handleGoHome : handleNewSession}
+            onClick={() => void (goHome || role === "player" ? handleGoHome() : handleNewSession())}
             className="flex items-center space-x-2 px-8 py-4 rounded-full bg-white text-black font-bold text-lg hover:bg-neutral-200 transition-all"
           >
             <span>
-              {goHome
+              {goHome || role === "player"
                 ? language === "de"
                   ? "Startseite"
                   : "Go Home"

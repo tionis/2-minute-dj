@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { id } from "@instantdb/react";
 import { useGameStore } from "@/lib/game-context";
-import { generateRoomCode, computeAdvanceToNextSong } from "@/lib/utils";
+import { generateRoomCode } from "@/lib/utils";
 import { Copy, Users, Play, Loader2, X, Crown, LogOut, Languages, Clock, SkipForward, RotateCcw } from "lucide-react";
 import GameView from "@/components/host/GameView";
 import SummaryView from "@/components/host/SummaryView";
@@ -14,7 +13,7 @@ import db from "@/lib/db";
 
 export default function HostPage() {
   const { t, language, setLanguage } = useI18n();
-  const { user, isLoadingAuth, peerId } = useGameStore();
+  const { isLoadingAuth, peerId, connectHost, disconnect, connectionError } = useGameStore();
 
   const [roomId, setRoomId] = useState<string | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(null);
@@ -44,34 +43,18 @@ export default function HostPage() {
   }, []);
 
   useEffect(() => {
-    if (isLoadingAuth || !user) return;
-    const savedRoomId = localStorage.getItem("2mdj_host_roomId");
-    const savedRoomCode = localStorage.getItem("2mdj_host_roomCode");
-
-    if (savedRoomId && savedRoomCode) {
-      setRoomId(savedRoomId);
-      setRoomCode(savedRoomCode);
-      return;
-    }
-
-    if (roomId) return;
-
-    const code = generateRoomCode();
-    const newId = id();
-    localStorage.setItem("2mdj_host_roomId", newId);
+    if (isLoadingAuth || !peerId || roomId) return;
+    const code = localStorage.getItem("2mdj_host_roomCode") || generateRoomCode();
+    const hostToken = localStorage.getItem("2mdj_host_token") || crypto.randomUUID();
     localStorage.setItem("2mdj_host_roomCode", code);
-    setRoomId(newId);
+    localStorage.setItem("2mdj_host_token", hostToken);
     setRoomCode(code);
 
-    db.transact(
-      db.tx.rooms[newId].update({
-        code,
-        creatorId: user.id,
-        status: "LOBBY",
-        createdAt: Date.now(),
-      })
-    );
-  }, [isLoadingAuth, user, roomId]);
+    void connectHost(code, hostToken).then((state) => {
+      localStorage.setItem("2mdj_host_roomId", state.room.id);
+      setRoomId(state.room.id);
+    }).catch(() => undefined);
+  }, [connectHost, isLoadingAuth, peerId, roomId]);
 
   const handleKickClick = (playerId: string, name: string) => {
     setKickPlayerId(playerId);
@@ -80,46 +63,38 @@ export default function HostPage() {
 
   const handleKickConfirm = () => {
     if (kickPlayerId) {
-      db.transact(db.tx.players[kickPlayerId].delete());
+      void db.kickPlayer(kickPlayerId);
       setKickPlayerId(null);
     }
   };
 
   const handleToggleVIP = (playerId: string, player: any) => {
-    db.transact(
-      db.tx.players[playerId].update({ isVip: player.isVip ? null : true })
-    );
+    void db.setVip(playerId, !player.isVip);
   };
 
-  const handleQuitConfirm = () => {
+  const handleQuitConfirm = async () => {
+    try { await db.closeRoom(); } catch { /* global action banner explains the failure */ }
     localStorage.removeItem("2mdj_host_roomId");
     localStorage.removeItem("2mdj_host_roomCode");
+    localStorage.removeItem("2mdj_host_token");
     localStorage.removeItem("2mdj_doc_backup");
+    await disconnect();
     window.location.href = "/";
   };
 
   const startGame = () => {
     if (!roomId) return;
-    db.transact(
-      db.tx.rooms[roomId].update({
-        status: "PLAYING",
-        playbackStartedAt: Date.now(),
-      })
-    );
+    void db.startGame();
   };
 
   const updateTimer = (sec: number) => {
     if (!roomId) return;
-    db.transact(db.tx.rooms[roomId].update({ timerDuration: sec }));
+    void db.setTimer(sec);
   };
 
   const toggleAutoSkip = () => {
     if (!roomId || !room) return;
-    db.transact(
-      db.tx.rooms[roomId].update({
-        autoSkip: room.autoSkip === false ? null : false,
-      })
-    );
+    void db.setAutoSkip(room.autoSkip === false);
   };
 
   const renderLangSwitcher = () => (
@@ -139,6 +114,26 @@ export default function HostPage() {
     </div>
   );
 
+  if (connectionError && !roomId) {
+    return (
+      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-white gap-4 p-6 text-center">
+        <p className="text-red-400 font-bold">Could not start the room</p>
+        <p className="text-neutral-500 text-sm max-w-md">{connectionError}</p>
+        <button
+          onClick={() => {
+            localStorage.removeItem("2mdj_host_roomId");
+            localStorage.removeItem("2mdj_host_roomCode");
+            localStorage.removeItem("2mdj_host_token");
+            window.location.reload();
+          }}
+          className="px-5 py-3 rounded-xl bg-white text-black font-bold"
+        >
+          Create a fresh room
+        </button>
+      </div>
+    );
+  }
+
   if (isLoadingAuth || !roomId || roomLoading) {
     return (
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
@@ -150,27 +145,7 @@ export default function HostPage() {
   if (room && (room as any).status === "FINISHED") {
     const resumeSession = () => {
       if (!room) return;
-      const pre = (room as any).preEndState;
-      if (pre) {
-        db.transact(db.tx.rooms[roomId].update({
-          status: "PAUSED",
-          currentVideoId: pre.currentVideoId ?? null,
-          currentStartTime: pre.currentStartTime ?? null,
-          currentVideoOffset: pre.currentVideoOffset ?? null,
-          activePlayerId: pre.activePlayerId ?? null,
-          activeQueueItemId: pre.activeQueueItemId ?? null,
-          currentTurnIndex: pre.currentTurnIndex ?? null,
-          playerOrder: pre.playerOrder ?? null,
-          playbackStartedAt: pre.playbackStartedAt ?? null,
-          pausedAt: Date.now(),
-          preEndState: null,
-        }));
-      } else {
-        db.transact(db.tx.rooms[roomId].update({
-          status: "LOBBY",
-          preEndState: null,
-        }));
-      }
+      void db.resumeSession();
     };
 
     return (
@@ -186,7 +161,7 @@ export default function HostPage() {
           </div>
           {renderLangSwitcher()}
         </div>
-        <SummaryView roomId={roomId} />
+        <SummaryView roomId={roomId} role="host" />
         <div className="flex justify-center mt-8">
           <button
             onClick={resumeSession}

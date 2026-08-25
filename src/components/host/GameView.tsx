@@ -5,7 +5,6 @@ import { Loader2, Music, User, SkipForward, Clock, Play, Settings, X, Crown, Pau
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useI18n } from "@/components/LanguageProvider";
 import HypeMeter from "./HypeMeter";
-import { computeAdvanceToNextSong, getPlayerOrder } from "@/lib/utils";
 import db from "@/lib/db";
 
 export default function GameView({ roomId }: { roomId: string }) {
@@ -34,9 +33,13 @@ export default function GameView({ roomId }: { roomId: string }) {
   const [ytApiReady, setYtApiReady] = useState(false);
 
   const stateRef = useRef<any>({ room, queueItems, players });
-  const isEndingRef = useRef(false);
   const ytPlayerRef = useRef<any>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  const handlePlaybackError = useCallback(() => {
+    const current = stateRef.current.room;
+    if (current?.activeQueueItemId) void db.advance(current.activeQueueItemId, "SKIPPED");
+  }, []);
 
   const onYTReady = useCallback(() => {
     if (iframeRef.current && iframeRef.current.contentWindow) {
@@ -44,13 +47,14 @@ export default function GameView({ roomId }: { roomId: string }) {
         ytPlayerRef.current = new (window as any).YT.Player(iframeRef.current, {
           events: {
             onReady: () => setIsPlayerReady(true),
+            onError: handlePlaybackError,
           },
         });
       } catch {
         setIsPlayerReady(true);
       }
     }
-  }, []);
+  }, [handlePlaybackError]);
 
   useEffect(() => {
     if (!(window as any).YT) {
@@ -65,7 +69,6 @@ export default function GameView({ roomId }: { roomId: string }) {
 
   useEffect(() => {
     stateRef.current = { room, queueItems, players };
-    isEndingRef.current = isEnding;
   }, [room, queueItems, players, isEnding]);
 
   useEffect(() => {
@@ -83,13 +86,14 @@ export default function GameView({ roomId }: { roomId: string }) {
         ytPlayerRef.current = new (window as any).YT.Player(iframeRef.current, {
           events: {
             onReady: () => setIsPlayerReady(true),
+            onError: handlePlaybackError,
           },
         });
       } catch {
         setIsPlayerReady(true);
       }
     }
-  }, [ytApiReady, iframeKey]);
+  }, [ytApiReady, iframeKey, handlePlaybackError]);
 
   useEffect(() => {
     setIsEnding(false);
@@ -114,55 +118,16 @@ export default function GameView({ roomId }: { roomId: string }) {
       const remaining = Math.max(0, duration - elapsed);
       setTimeLeft(remaining);
 
-      const autoSkipEnabled = currentRoom.autoSkip !== false;
-      if (remaining <= 0 && !isEndingRef.current && autoSkipEnabled) {
-        setIsEnding(true);
-        doAdvance();
-      }
     }, 500);
 
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    if (!room) return;
-    const pendingCount = queueItems.filter(
-      (q: any) => q.status === "PENDING"
-    ).length;
-    if (
-      room.status === "PLAYING" &&
-      !room.currentVideoId &&
-      pendingCount > 0
-    ) {
-      doAdvance();
-    }
-  }, [room?.status, room?.currentVideoId, queueItems]);
-
   const doAdvance = () => {
     const current = stateRef.current;
     if (!current.room) return;
-
-    const result = computeAdvanceToNextSong(
-      current.room,
-      current.players,
-      current.queueItems,
-      true
-    );
-
-    const txns: any[] = [];
-
-    if (result.queueItemUpdates) {
-      for (const [itemId, updates] of Object.entries(
-        result.queueItemUpdates
-      )) {
-        txns.push(db.tx.queueItems[itemId].update(updates as any));
-      }
-    }
-
-    txns.push(db.tx.rooms[roomId].update(result.roomUpdates));
-
-    db.transact(txns);
-    setIsEnding(false);
+    setIsEnding(true);
+    void db.advance(current.room.activeQueueItemId, "PLAYED").finally(() => setIsEnding(false));
   };
 
   const togglePause = () => {
@@ -187,27 +152,11 @@ export default function GameView({ roomId }: { roomId: string }) {
         try { player.pauseVideo(); } catch {}
       }
 
-      db.transact(
-        db.tx.rooms[roomId].update({
-          status: "PAUSED",
-          pausedAt: Date.now(),
-          currentVideoOffset: videoOffset,
-        })
-      );
+      void db.pause(videoOffset);
     } else if (room.status === "PAUSED") {
-      const pauseDuration = room.pausedAt
-        ? Date.now() - room.pausedAt
-        : 0;
-      const newStart = (room.playbackStartedAt || Date.now()) + pauseDuration;
       const seekTo = room.currentVideoOffset ?? room.currentStartTime ?? 0;
 
-      db.transact(
-        db.tx.rooms[roomId].update({
-          status: "PLAYING",
-          playbackStartedAt: newStart,
-          pausedAt: null,
-        })
-      );
+      void db.resume();
 
       const player = ytPlayerRef.current;
       if (player && typeof player.seekTo === "function" && typeof player.playVideo === "function") {
@@ -224,51 +173,16 @@ export default function GameView({ roomId }: { roomId: string }) {
   const endSession = () => {
     if (!room) return;
 
-    const currentActiveItem = queueItems.find(
-      (q: any) => q.id === room.activeQueueItemId
-    );
-
-    const preEndState: Record<string, unknown> = {};
-    if (room.currentVideoId != null) preEndState.currentVideoId = room.currentVideoId;
-    if (room.currentStartTime != null) preEndState.currentStartTime = room.currentStartTime;
-    if (room.currentVideoOffset != null) preEndState.currentVideoOffset = room.currentVideoOffset;
-    if (room.playbackStartedAt != null) preEndState.playbackStartedAt = room.playbackStartedAt;
-    if (room.activePlayerId != null) preEndState.activePlayerId = room.activePlayerId;
-    if (room.activeQueueItemId != null) preEndState.activeQueueItemId = room.activeQueueItemId;
-    if (room.currentTurnIndex != null) preEndState.currentTurnIndex = room.currentTurnIndex;
-    if (room.playerOrder) preEndState.playerOrder = room.playerOrder;
-
-    const txns: any[] = [
-      db.tx.rooms[roomId].update({
-        status: "FINISHED",
-        currentVideoId: null,
-        activePlayerId: null,
-        playbackStartedAt: null,
-        pausedAt: null,
-        preEndState,
-      }),
-    ];
-
-    if (currentActiveItem) {
-      txns.push(
-        db.tx.queueItems[currentActiveItem.id].update({ status: "PLAYED" })
-      );
-    }
-
-    db.transact(txns);
+    void db.endSession();
   };
 
   const updateTimer = (seconds: number) => {
-    db.transact(db.tx.rooms[roomId].update({ timerDuration: seconds }));
+    void db.setTimer(seconds);
   };
 
   const addTime = (seconds: number) => {
     if (!room?.playbackStartedAt) return;
-    db.transact(
-      db.tx.rooms[roomId].update({
-        playbackStartedAt: room.playbackStartedAt + seconds * 1000,
-      })
-    );
+    void db.addTime(seconds);
   };
 
   const handleKick = (playerId: string, name: string) => {
@@ -278,79 +192,23 @@ export default function GameView({ roomId }: { roomId: string }) {
 
   const confirmKick = () => {
     if (kickPlayerId) {
-      db.transact(db.tx.players[kickPlayerId].delete());
+      void db.kickPlayer(kickPlayerId);
       setKickPlayerId(null);
     }
   };
 
   const handleToggleVIP = (playerId: string, isVip: boolean) => {
-    db.transact(
-      db.tx.players[playerId].update({ isVip: isVip ? null : true })
-    );
+    void db.setVip(playerId, !isVip);
   };
 
   const toggleAutoSkip = () => {
     if (!room) return;
-    db.transact(
-      db.tx.rooms[roomId].update({
-        autoSkip: room.autoSkip === false ? null : false,
-      })
-    );
+    void db.setAutoSkip(room.autoSkip === false);
   };
 
   const forcePlayerTurn = (playerId: string) => {
     if (!room) return;
-    const playerOrder = getPlayerOrder(players, room.playerOrder);
-    const idx = playerOrder.indexOf(playerId);
-    if (idx === -1) return;
-
-    const pendingForPlayer = queueItems.filter(
-      (q: any) => q.status === "PENDING" && q.playerId === playerId
-    );
-
-    const txns: any[] = [];
-
-    if (room.activeQueueItemId) {
-      const currentItem = queueItems.find(
-        (q: any) => q.id === room.activeQueueItemId
-      );
-      if (currentItem) {
-        txns.push(db.tx.queueItems[currentItem.id].update({ status: "PLAYED" }));
-      }
-    }
-
-    if (pendingForPlayer.length > 0) {
-      const nextItem = pendingForPlayer.sort(
-        (a: any, b: any) => a.createdAt - b.createdAt
-      )[0];
-      txns.push(
-        db.tx.rooms[roomId].update({
-          currentTurnIndex: idx,
-          activePlayerId: playerId,
-          activeQueueItemId: nextItem.id,
-          currentVideoId: nextItem.videoId,
-          currentStartTime: nextItem.highlightStart,
-          currentVideoOffset: nextItem.highlightStart,
-          playbackStartedAt: Date.now(),
-          previousQueueItemId: room.activeQueueItemId ?? null,
-        })
-      );
-    } else {
-      txns.push(
-        db.tx.rooms[roomId].update({
-          currentTurnIndex: idx,
-          activePlayerId: playerId,
-          activeQueueItemId: null,
-          currentVideoId: null,
-          currentStartTime: null,
-          currentVideoOffset: null,
-          playbackStartedAt: null,
-          previousQueueItemId: room.activeQueueItemId ?? null,
-        })
-      );
-    }
-
-    db.transact(txns);
+    void db.forceTurn(playerId);
     setShowPlayers(false);
   };
 

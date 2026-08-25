@@ -2,6 +2,7 @@
  * Session History Management
  * Stores session snapshots in localStorage for later viewing/downloading
  */
+import LZString from "lz-string";
 
 export interface SessionSong {
   id: string;
@@ -19,10 +20,17 @@ export interface SessionSnapshot {
   playerCount: number;
   endedAt: number;
   role: "host" | "player";
+  summaryId?: string;
 }
 
 const STORAGE_KEY = "2mdj_session_history";
 const MAX_SESSIONS = 20; // Keep last 20 sessions
+
+export function escapeHtml(value: unknown): string {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[character]!);
+}
 
 /**
  * Get all stored sessions
@@ -121,9 +129,7 @@ export function getSession(sessionId: string): SessionSnapshot | null {
  */
 export function generateShareUrl(session: SessionSnapshot): string {
   if (typeof window === "undefined") return "";
-  
-  // Use the same compression as SummaryView
-  const LZString = require("lz-string");
+  if (session.summaryId) return `${window.location.origin}/summary?id=${encodeURIComponent(session.summaryId)}`;
   
   const summaryData = {
     roomCode: session.roomCode,
@@ -146,12 +152,13 @@ export function generateSessionHTML(session: SessionSnapshot): string {
     return Math.round(sum / votes.length);
   };
 
+  const safeRoomCode = escapeHtml(session.roomCode);
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>2-Minute DJ Session - ${session.roomCode}</title>
+  <title>2-Minute DJ Session - ${safeRoomCode}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #fff; padding: 40px 20px; line-height: 1.6; }
@@ -178,7 +185,7 @@ export function generateSessionHTML(session: SessionSnapshot): string {
 <body>
   <div class="container">
     <h1>🎧 Session Summary</h1>
-    <p class="subtitle">${session.songs.length} tracks shared • Room: ${session.roomCode} • ${session.playerCount} players</p>
+    <p class="subtitle">${session.songs.length} tracks shared • Room: ${safeRoomCode} • ${session.playerCount} players</p>
     
     ${session.songs.map((song, index) => {
       const score = calculateScore(song.votes);
@@ -186,13 +193,13 @@ export function generateSessionHTML(session: SessionSnapshot): string {
       return `
     <div class="song">
       <div class="index">${index + 1}</div>
-      <img class="thumbnail" src="https://img.youtube.com/vi/${song.video_id}/mqdefault.jpg" alt="" onerror="this.style.display='none'">
+      <img class="thumbnail" src="https://img.youtube.com/vi/${escapeHtml(song.video_id)}/mqdefault.jpg" alt="" onerror="this.style.display='none'">
       <div class="info">
-        <div class="title">${song.video_title || `Unknown Track (${song.video_id})`}${song.status === 'SKIPPED' ? '<span class="skipped">Skipped</span>' : ''}</div>
-        <div class="dj">DJ ${song.player_nickname}</div>
+        <div class="title">${escapeHtml(song.video_title || `Unknown Track (${song.video_id})`)}${song.status === 'SKIPPED' ? '<span class="skipped">Skipped</span>' : ''}</div>
+        <div class="dj">DJ ${escapeHtml(song.player_nickname)}</div>
       </div>
       ${score !== null ? `<div class="score ${scoreClass}">${score}%</div>` : ''}
-      <a class="link" href="https://youtube.com/watch?v=${song.video_id}" target="_blank" rel="noopener">▶</a>
+      <a class="link" href="https://youtube.com/watch?v=${encodeURIComponent(song.video_id)}" target="_blank" rel="noopener">▶</a>
     </div>`;
     }).join('')}
     

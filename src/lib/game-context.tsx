@@ -1,18 +1,22 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { InstaQLEntity, User } from "@instantdb/react";
-import type { MySchema } from "./db";
-
-export type RoomEntity = InstaQLEntity<MySchema, "rooms">;
-export type PlayerEntity = InstaQLEntity<MySchema, "players">;
-export type QueueItemEntity = InstaQLEntity<MySchema, "queueItems">;
+import type { GameStateSnapshot } from "./types";
+import type { ConnectionStatus } from "./realtime-client";
 
 export interface GameStoreContextType {
-  user: User | null;
+  user: { id: string } | null;
   isLoadingAuth: boolean;
   authError: { message: string } | null;
   peerId: string;
+  snapshot: GameStateSnapshot | null;
+  connectionStatus: ConnectionStatus;
+  connectionError: string | null;
+  actionError: string | null;
+  clearActionError: () => void;
+  connectHost: (code: string, authToken: string) => Promise<GameStateSnapshot>;
+  connectPlayer: (code: string, playerId: string, authToken: string, nickname: string) => Promise<GameStateSnapshot>;
+  disconnect: () => Promise<void>;
 }
 
 export const GameStoreContext = createContext<GameStoreContextType | null>(null);

@@ -15,7 +15,7 @@ declare global {
 interface ClipperStepProps {
   videoId: string;
   timerDuration?: number; // Timer duration in seconds (default 120)
-  onQueue: (startTime: number) => void;
+  onQueue: (startTime: number) => void | Promise<void>;
   onBack: () => void;
 }
 
@@ -26,6 +26,8 @@ export default function ClipperStep({ videoId, timerDuration = 120, onQueue, onB
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [isReady, setIsReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackError, setPlaybackError] = useState(false);
+  const [isQueuing, setIsQueuing] = useState(false);
   const playerRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -74,7 +76,12 @@ export default function ClipperStep({ videoId, timerDuration = 120, onQueue, onB
             } else if (event.data === window.YT.PlayerState.ENDED) {
               setIsPlaying(false);
             }
-          }
+          },
+          onError: () => {
+            setPlaybackError(true);
+            setIsReady(true);
+            setIsPlaying(false);
+          },
         }
       });
     };
@@ -130,12 +137,13 @@ export default function ClipperStep({ videoId, timerDuration = 120, onQueue, onB
     }
   };
 
-  const handleQueue = () => {
+  const handleQueue = async () => {
     // Stop the player before unmounting to prevent AbortError
     if (playerRef.current?.stopVideo) {
       playerRef.current.stopVideo();
     }
-    onQueue(startTime);
+    setIsQueuing(true);
+    try { await onQueue(startTime); } finally { setIsQueuing(false); }
   };
 
   return (
@@ -149,6 +157,11 @@ export default function ClipperStep({ videoId, timerDuration = 120, onQueue, onB
         {!isReady && (
           <div className="absolute inset-0 flex items-center justify-center z-20 bg-neutral-900">
             <Loader2 className="animate-spin text-neutral-500" />
+          </div>
+        )}
+        {playbackError && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-neutral-900 p-6 text-center text-sm text-red-300">
+            This video cannot be embedded. Choose another YouTube video.
           </div>
         )}
 
@@ -242,11 +255,12 @@ export default function ClipperStep({ videoId, timerDuration = 120, onQueue, onB
                 {t("back")}
             </button>
             <button
-                onClick={handleQueue}
-                className="flex-[2] bg-indigo-600 text-white font-bold py-4 rounded-xl hover:bg-indigo-500 transition-colors flex items-center justify-center space-x-2"
+                onClick={() => void handleQueue()}
+                disabled={playbackError || isQueuing}
+                className="flex-[2] bg-indigo-600 text-white font-bold py-4 rounded-xl hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center space-x-2"
             >
-                <span>{t("addToQueue")}</span>
-                <Check size={20} />
+                {isQueuing ? <Loader2 className="animate-spin" size={20} /> : <Check size={20} />}
+                <span>{isQueuing ? (language === "de" ? "Wird hinzugefügt…" : "Adding…") : t("addToQueue")}</span>
             </button>
           </div>
         </div>
