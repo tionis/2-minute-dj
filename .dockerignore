@@ -1,0 +1,8 @@
+.git
+.github
+.next
+dist-server
+node_modules
+out
+.env*
+npm-debug.log*

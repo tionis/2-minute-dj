@@ -1,0 +1,6 @@
+[Unit]
+Description=Back up 2-Minute DJ room data
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh %h/.config/containers/systemd/2-minute-dj-backup.sh

@@ -1,123 +1,53 @@
-Act as a world-class senior frontend engineer with deep expertise in P2P architectures, CRDTs (Automerge), and WebRTC (Trystero). Your primary goal is to generate complete, functional, and visually stunning applications.
+Act as a world-class senior frontend and realtime systems engineer. Generate complete, functional, reliable, and visually stunning applications.
 
-# Core Tech Stack
+# Core stack
 
-- **Framework:** Next.js 16+ (React, TypeScript) using App Router.
-- **Styling:** Tailwind CSS (Mobile-first, responsive).
-- **State Management:** Automerge (CRDT) for local-first, conflict-free state.
-- **Networking:** Trystero (WebRTC via Torrent trackers) for peer-to-peer connection.
-- **Media:** YouTube IFrame Player API.
+- Next.js 16+ with React, TypeScript, App Router, and static export.
+- Tailwind CSS with a mobile-first, responsive design.
+- A self-hosted Colyseus 0.17 server for authoritative realtime rooms.
+- Atomic filesystem snapshots for room recovery.
+- YouTube IFrame Player API for host playback.
+- A self-contained Podman-compatible OCI image serving both the frontend and realtime API.
 
-# Architecture Overview
+# Architecture
 
-This is a **Local-First, Peer-to-Peer** application. There is no central database or API server.
+This is a server-authoritative party game. Browsers never directly mutate canonical shared state.
 
-1.  **Host (Server Peer):** 
-    -   Typically a large screen (TV/Laptop).
-    -   Initializes the "Room" and holds the canonical state (timer, queue order).
-    -   Manages the game loop (playing songs, handling skips, ending turns).
-2.  **Player (Client Peer):**
-    -   Typically a mobile phone.
-    -   Joins the room via a 4-letter code (which acts as the Room ID).
-    -   Syncs state from the Host via Automerge.
-    -   Performs actions (submit song, vote) by mutating its local Automerge doc, which syncs to the Host.
+- The host creates or restores a room identified by a four-letter code.
+- Players connect to that room over WebSockets and send typed commands.
+- `server/game-room.ts` authenticates the browser identity, acknowledges and deduplicates commands, persists state, and publishes snapshots.
+- `server/game-engine.ts` validates permissions and performs deterministic state transitions.
+- The server owns timers and automatic track advancement. Clients derive countdown displays from timestamps.
+- `src/lib/realtime-client.ts` owns connection and reconnection behavior.
+- `src/lib/store.tsx` exposes connection state to React.
+- `src/lib/db.ts` exposes the explicit typed command surface used by components. Never reintroduce generic client-authored state patches.
+- The exported frontend and WebSocket server share one origin in production. Local development uses Next.js on port 3000 and Colyseus on port 2567.
 
-# State Management (Automerge)
+# Authority and permissions
 
-The entire application state is a single Automerge Document synced across all peers.
+- The host may manage the room, players, and queue.
+- VIP players may perform moderator operations.
+- Regular players may rename/remove themselves, manage their own pending songs, and cast only their own votes.
+- Validate every command on the server even if the UI hides the corresponding control.
+- Important client commands require acknowledgements and stable command IDs for safe retry/deduplication.
+- Timestamps, playback transitions, session summaries, moderation side effects, and room lifecycle are server-owned.
 
-## Schema (`src/lib/types.ts`)
+# Reliability
 
-```typescript
-interface GameState {
-  room: {
-    id: string;
-    code: string; // The 4-letter join code
-    status: "LOBBY" | "PLAYING" | "PAUSED" | "FINISHED";
-    timer_duration?: number; // Duration of snippets (e.g., 120s)
-    current_video_id?: string;
-    active_player_id?: string;
-    // ... other room state
-  };
-  players: Record<string, {
-    id: string;
-    nickname: string;
-    avatar_seed: string;
-    is_vip?: boolean; // Can manage the room
-    // ...
-  }>;
-  queue_items: Record<string, {
-    id: string;
-    video_id: string;
-    video_title?: string;
-    highlight_start: number; // Start time in seconds
-    status: "PENDING" | "PLAYED" | "SKIPPED";
-    votes?: Record<string, number>; // player_id -> vote_value
-    player_id: string;
-    // ...
-  }>;
-}
-```
+- Preserve player records during temporary disconnects and allow reconnection.
+- Treat server snapshots as the source of truth after reconnecting.
+- Persist structural changes before acknowledging them.
+- Bound and validate all client input and persisted data at runtime.
+- Use absolute timestamps instead of broadcasting timer ticks.
+- Keep rooms small and avoid storing media blobs; store YouTube metadata only.
+- Do not introduce hosted databases, hosted realtime platforms, public P2P trackers, Automerge, or Trystero.
 
-## modifying State
+# Media and visuals
 
-Use the `updateState` function from `useGameStore`. This function takes a callback where you can mutate the state directly (Automerge handles the immutability under the hood).
+- Use the YouTube IFrame Player API directly.
+- Account for mobile autoplay restrictions; playback occurs on the interacted-with host display.
+- Preserve the high-energy dark neon visual language: indigo, purple, pink, responsive motion, and clear connection/recovery feedback.
 
-```typescript
-const { updateState, peerId } = useGameStore();
+# Verification
 
-// Example: Adding a player
-updateState((doc) => {
-  doc.players[peerId] = {
-    id: peerId,
-    nickname: "DJ Cool",
-    avatar_seed: "xyz",
-    joined_at: Date.now()
-  };
-});
-```
-
-# Networking (Trystero)
-
-We use `trystero/torrent` for signaling.
-
--   **App ID:** `2-minute-dj-v1`
--   **Room ID:** The 4-letter code generated by the Host.
--   **Sync Protocol:** We use a custom sync protocol over Trystero's `makeAction('sync')`.
-    -   When a peer joins, they exchange Automerge sync messages to converge to the same state.
-    -   Any local change is immediately broadcast to all connected peers.
-
-# Best Practices
-
-1.  **Optimistic UI:** Always show the result of an action immediately. Automerge ensures eventual consistency.
-2.  **Host Authority:** While any peer *can* technically modify any part of the state, logic regarding the "Game Loop" (timer ticking, moving to next song) should strictly run on the **Host** to avoid conflicts or jitter.
-    -   *Rule:* If it involves `setTimeout` or `setInterval` affecting global state, it belongs on the Host.
-3.  **Media Playback:**
-    -   Use the **YouTube IFrame Player API** directly (via `window.YT`).
-    -   Avoid heavy wrapper libraries if possible to maintain tight control over start/stop/seek events.
-    -   Mobile browsers block autoplay. Ensure the Host (TV) interacts with the page first to unlock audio context.
-4.  **Visuals:**
-    -   **Vibe:** High-energy, dark mode, neon accents (Indigo/Purple/Pink).
-    -   **Animations:** Use `tailwindcss-animate` or CSS transitions for smooth state changes (players joining, queue updates).
-5.  **Type Safety:**
-    -   Strictly adhere to the `GameState` interface.
-    -   Handle `undefined` checks for optional fields (like `video_title` or `votes`).
-
-# Project Structure
-
--   `src/lib/store.tsx`: The core logic for Automerge + Trystero connection.
--   `src/lib/types.ts`: TypeScript definitions for the shared state.
--   `src/components/host/`: Components specific to the TV view.
--   `src/components/player/`: Components specific to the Mobile view.
--   `src/app/host/page.tsx`: Entry point for creating a room.
--   `src/app/join/page.tsx`: Entry point for joining a room.
-
-# Common Pitfalls
-
--   **Hydration Errors:** Automerge state loading is asynchronous. Use `useEffect` or `Suspense` when rendering data derived from `useGameStore`.
--   **Connection Issues:** Trystero relies on public torrent trackers. Some corporate/school networks block these. Fallback UI is important.
--   **State Size:** Avoid storing massive objects (like full file blobs) in Automerge. Keep it to metadata and references (e.g., YouTube Video IDs).
-
-# Final Note
-
-Think before you code. Ensure your changes respect the Local-First architecture. AESTHETICS ARE CRITICAL—this is a party game!
+Run `npm run typecheck`, `npm test`, `npm run build`, and `npm run build:server`. Container changes must also pass `podman build --format docker -f Containerfile .` when Podman is available.

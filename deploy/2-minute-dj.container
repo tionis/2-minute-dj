@@ -1,0 +1,24 @@
+[Unit]
+Description=2-Minute DJ
+
+[Container]
+Image=ghcr.io/tionis/2-minute-dj:latest
+ContainerName=2-minute-dj
+AutoUpdate=registry
+PublishPort=2567:2567
+Volume=2-minute-dj-data.volume:/data:Z
+Environment=NODE_ENV=production
+Environment=ROOM_TTL_HOURS=24
+Environment=SUMMARY_TTL_DAYS=90
+ReadOnly=true
+Tmpfs=/tmp:rw,size=64m,nosuid,nodev,noexec
+DropCapability=all
+NoNewPrivileges=true
+
+[Service]
+Restart=always
+TimeoutStartSec=900
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
