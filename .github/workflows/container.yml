@@ -46,6 +46,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # The deploy step proves the repository and branch to Gandalf with it.
+      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -67,6 +69,7 @@ jobs:
             type=ref,event=tag
             type=sha
       - uses: docker/build-push-action@v7
+        id: build
         with:
           context: .
           file: ./Containerfile
@@ -76,3 +79,12 @@ jobs:
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Runs the pushed digest on Citadel through the Gandalf app platform; the node
+      # rolls back if the app does not become healthy, which fails this step.
+      - name: Deploy through Gandalf
+        if: github.ref == 'refs/heads/main'
+        uses: tionis/app-deploy@512afe26ca53c27e76267877f746877738947beb
+        with:
+          service: 2-minute-dj
+          image: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}

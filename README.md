@@ -78,6 +78,10 @@ ghcr.io/tionis/2-minute-dj:v<version>
 
 No repository secret or frontend build variable is needed. If the GHCR package is private, authenticate Podman to GHCR on the deployment machine once; alternatively, make the package public.
 
+### dj.tionis.dev
+
+The public instance runs on Citadel through the Gandalf app platform. After the image is pushed from `main`, the workflow's last step asks the Gandalf gateway to deploy that digest, proving the repository and branch with GitHub's OIDC identity token (no repository secret). The node pulls the digest, restarts the app, waits for `/readyz`, and rolls back if it doesn't become healthy, which fails the step. Its configuration, data directory (`/srv/2-minute-dj`), backups and Caddy route live in Gandalf (`inventory/services/2-minute-dj/service.yml`); the Quadlet below is for running it elsewhere.
+
 ### Podman Quadlet
 
 Copy the supplied units to the rootless Quadlet directory and start the service:
